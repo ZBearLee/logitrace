@@ -1,0 +1,16 @@
+[project]
+name = "logitrace-backend"
+version = "0.1.0"
+description = "LogiTrace 实时物流追踪平台 - 后端服务"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]   # 错误/pyflakes/import排序/警告
+ignore = ["E501"]                # 行宽由 format 管，lint 不重复管
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
