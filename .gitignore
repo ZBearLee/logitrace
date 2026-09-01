@@ -1,0 +1,31 @@
+# ===== 个人文档（不上传） =====
+docs/
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# ===== Node =====
+node_modules/
+dist/
+*.local
+
+# ===== 环境与密钥 =====
+.env
+.env.*
+!.env.example
+
+# ===== IDE / 系统 =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ===== 数据卷（docker mysql/redis 持久化） =====
+deploy/data/
