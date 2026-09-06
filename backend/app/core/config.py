@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "LogiTrace"
     debug: bool = False
 
-    # MySQL（第 03 步 Docker 编排后填真实值）
+    # MySQL（与 deploy/docker-compose.yml 保持一致）
     mysql_host: str = "localhost"
     mysql_port: int = 3306
     mysql_user: str = "logitrace"

@@ -1,0 +1,106 @@
+# LogiTrace 容器编排
+# ------------------------------------------------------------------
+# 在 deploy/ 目录下执行：
+#
+#   ① 全容器演示（mysql + redis + backend 三容器）
+#      docker compose up -d --build
+#
+#   ② 本地开发（只起中间件，backend 用 venv 跑 --reload）
+#      docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+#   ③ 看状态 / 看日志 / 停止
+#      docker compose ps
+#      docker compose logs -f backend
+#      docker compose down            # 停容器（数据卷保留）
+#      docker compose down -v         # 连数据卷一起删（慎用）
+# ------------------------------------------------------------------
+
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: logitrace-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: logitrace
+      MYSQL_USER: logitrace
+      MYSQL_PASSWORD: logitrace
+      TZ: UTC
+    # 时间统一 UTC：物流是跨时区业务，存储一律 UTC，展示层做本地化
+    command: >
+      --default-time-zone=+00:00
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # backend 的 depends_on 依赖这个探活结果，避免"数据库还没好就连上去"
+      # start_period 放宽到 120s：首次启动要初始化数据卷（建库、建用户、再重启一次），
+      # 慢机器上这段要 2 分钟以上，窗口给窄了会被误判 unhealthy
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-prootpass"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+    networks:
+      - logitrace
+
+  redis:
+    image: redis:7-alpine
+    container_name: logitrace-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks:
+      - logitrace
+
+  backend:
+    build:
+      context: ..            # 构建上下文 = 项目根目录
+      dockerfile: backend/Dockerfile
+    container_name: logitrace-backend
+    environment:
+      # 容器内用服务名互访，不用 localhost
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USER: logitrace
+      MYSQL_PASSWORD: logitrace
+      MYSQL_DATABASE: logitrace
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      DEBUG: "true"
+    ports:
+      - "8000:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # 用 python 自检，不为 curl 单独装包
+      # 显式禁用代理 + 带超时，避免请求挂死；timeout 给到 20s，慢机器上 python 冷启动本身就要几秒
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 20s
+      timeout: 20s
+      retries: 5
+      start_period: 40s
+    networks:
+      - logitrace
+
+# 数据用命名卷而非 bind mount：Windows + NTFS 下 bind mount 容易踩权限/性能坑，
+# 命名卷由 Docker 托管，最稳。deploy/data/ 的 gitignore 规则保留以备用。
+volumes:
+  mysql-data:
+  redis-data:
+
+networks:
+  logitrace:
+    driver: bridge
