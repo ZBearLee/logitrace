@@ -1,0 +1,4 @@
+# pnpm 11 配置：构建脚本白名单放在这里（package.json 的 pnpm 字段已不再读取）
+# @parcel/watcher 是 sass 的原生文件监听依赖，需要运行构建脚本，否则退化为轮询监听
+allowBuilds:
+  '@parcel/watcher': true
