@@ -1,0 +1,17 @@
+# 开发环境 override：只起中间件（mysql + redis）
+#
+# backend 被放进 "full" profile，默认不启动 —— 开发时 backend 用本地 venv 跑：
+#   cd backend && .venv\Scripts\python.exe -m uvicorn app.main:app --reload
+# 这样改代码热更新，不用每次重建镜像。
+#
+# 用法：
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# 需要连容器一起跑时（演示/CI）：
+#   docker compose --profile full up -d --build
+#
+# 覆盖 backend 的 profile（profile 不可"取消"，所以这里只声明要覆盖的字段）
+services:
+  backend:
+    profiles:
+      - full

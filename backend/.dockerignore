@@ -1,0 +1,18 @@
+# 构建上下文瘦身：这些文件不进镜像
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# 本地配置与密钥（容器内的值由 docker-compose 注入）
+.env
+.env.*
+
+# 测试代码不进运行镜像
+tests/
+
+# 个人文档
+docs/
