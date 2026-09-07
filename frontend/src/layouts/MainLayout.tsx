@@ -19,6 +19,7 @@ export default function MainLayout() {
   // 同页内手动展开/收起后保持，直到再次切换路由
   const [collapsed, setCollapsed] = useState(current?.fullscreen ?? false)
   useEffect(() => {
+    // oxlint-disable-next-line react/set-state-in-effect -- 路由切换时需把 Sider 折叠态重置为该路由的 fullscreen 值，属外部系统（路由）同步，非多余渲染
     setCollapsed(current?.fullscreen ?? false)
   }, [pathname, current?.fullscreen])
 

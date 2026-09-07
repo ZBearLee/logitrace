@@ -32,7 +32,9 @@ export default function StatusIndicator() {
   }, [])
 
   if (error) {
-    return <Badge status="error" text={<Typography.Text type="danger">后端未连通</Typography.Text>} />
+    return (
+      <Badge status="error" text={<Typography.Text type="danger">后端未连通</Typography.Text>} />
+    )
   }
   if (health) {
     return <Badge status="success" text={`${health.app} · ${health.status}`} />
