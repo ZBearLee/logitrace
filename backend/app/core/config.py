@@ -19,9 +19,21 @@ class Settings(BaseSettings):
 
     @property
     def mysql_dsn(self) -> str:
-        """SQLAlchemy 连接串（异步驱动 aiomysql）。"""
+        """SQLAlchemy 异步连接串（应用运行时用，驱动 aiomysql）。"""
         return (
             f"mysql+aiomysql://{self.mysql_user}:{self.mysql_password}"
+            f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
+        )
+
+    @property
+    def mysql_dsn_sync(self) -> str:
+        """SQLAlchemy 同步连接串（Alembic 迁移专用，驱动 pymysql）。
+
+        迁移是启动时一次性 DDL，不需要异步；Alembic 官方模板也是同步引擎。
+        pymysql 是纯 Python 驱动，免编译，适合本地和 CI。
+        """
+        return (
+            f"mysql+pymysql://{self.mysql_user}:{self.mysql_password}"
             f"@{self.mysql_host}:{self.mysql_port}/{self.mysql_database}"
         )
 
