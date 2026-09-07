@@ -24,6 +24,8 @@ dist/
 # ===== IDE / 系统 =====
 .idea/
 .vscode/
+# 放行 frontend 的编辑器配置目录（目录内放行哪些文件，由 frontend/.gitignore 决定）
+!frontend/.vscode/
 .DS_Store
 Thumbs.db
 
