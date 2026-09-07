@@ -42,7 +42,9 @@ class PositionPoint(Base):
     speed: Mapped[float | None] = mapped_column(Float, nullable=True)
     heading: Mapped[float | None] = mapped_column(Float, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
 
 
 class MilestoneEvent(Base):
@@ -69,7 +71,9 @@ class MilestoneEvent(Base):
     )
     occurred_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     payload_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
 
 
 class ExceptionRecord(Base):
@@ -89,5 +93,7 @@ class ExceptionRecord(Base):
         server_default="info",
     )
     detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    detected_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

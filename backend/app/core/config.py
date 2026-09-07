@@ -27,7 +27,7 @@ class Settings(BaseSettings):
 
     @property
     def mysql_dsn_sync(self) -> str:
-        """SQLAlchemy 同步连接串（Alembic 迁移专用，驱动 pymysql）。
+        """SQLAlchemy 同步连接串（Alembic迁移 / 脚本等同步场景用，驱动 pymysql）。
 
         迁移是启动时一次性 DDL，不需要异步；Alembic 官方模板也是同步引擎。
         pymysql 是纯 Python 驱动，免编译，适合本地和 CI。
