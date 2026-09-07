@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Layout, Menu, Typography } from 'antd'
+import { Button, Layout, Menu } from 'antd'
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { routes } from '../router'
 import StatusIndicator from '../components/StatusIndicator'
+import RouteBreadcrumb from '../components/RouteBreadcrumb'
 
 const { Header, Sider, Content } = Layout
 
@@ -29,11 +31,11 @@ export default function MainLayout() {
     <Layout style={{ height: '100vh' }}>
       <Sider
         theme="dark"
-        collapsible
         collapsed={collapsed}
         onCollapse={setCollapsed}
         breakpoint="lg"
         collapsedWidth="64"
+        trigger={null}
       >
         <div
           style={{
@@ -58,6 +60,7 @@ export default function MainLayout() {
       <Layout>
         <Header
           style={{
+            height: 48,
             background: '#fff',
             display: 'flex',
             alignItems: 'center',
@@ -65,9 +68,14 @@ export default function MainLayout() {
             paddingInline: 16,
           }}
         >
-          <Typography.Title level={5} style={{ margin: 0 }}>
-            实时物流追踪平台
-          </Typography.Title>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <Button
+              type="text"
+              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              onClick={() => setCollapsed((c) => !c)}
+            />
+            <RouteBreadcrumb />
+          </div>
           <StatusIndicator />
         </Header>
         <Content
