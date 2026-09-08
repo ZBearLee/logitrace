@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Badge, Spin, Typography } from 'antd'
-import { getHealth, type HealthResponse } from '../api/client'
+import { getHealth, type HealthResponse } from '@/api/client'
 
 /**
  * 全局健康状态指示灯：在 MainLayout 的 Header 常驻，

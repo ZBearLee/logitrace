@@ -1,0 +1,4 @@
+# 统一仓库内文本文件的换行符为 LF。
+# 避免 Windows 上 Git (core.autocrlf=true) 把工作区文件转成 CRLF，
+# 与 prettier 的 endOfLine:"lf" 互相转换，产生无意义的整文件 diff。
+* text=auto eol=lf

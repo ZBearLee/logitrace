@@ -1,6 +1,6 @@
 import { DashboardOutlined } from '@ant-design/icons'
-import type { AppRoute } from '../types'
-import Dashboard from '../../pages/dashboard/Dashboard'
+import type { AppRoute } from '@/router/types'
+import Dashboard from '@/pages/dashboard/Dashboard'
 
 export const dashboardRoutes: AppRoute[] = [
   {

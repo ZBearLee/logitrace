@@ -12,7 +12,10 @@ export class ApiError extends Error {
 
 const DEFAULT_TIMEOUT = 10000
 
-async function request<T>(path: string, options?: RequestInit & { timeout?: number }): Promise<T> {
+export async function request<T>(
+  path: string,
+  options?: RequestInit & { timeout?: number },
+): Promise<T> {
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)

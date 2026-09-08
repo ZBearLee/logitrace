@@ -1,6 +1,6 @@
 import { Breadcrumb } from 'antd'
 import { useLocation } from 'react-router-dom'
-import { routes } from '../router'
+import { routes } from '@/router'
 
 /**
  * 头部面包屑：父级（平台根）+ 当前路由逐级 label。

@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { Button, Layout, Menu } from 'antd'
 import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { routes } from '../router'
-import StatusIndicator from '../components/StatusIndicator'
-import RouteBreadcrumb from '../components/RouteBreadcrumb'
+import { routes } from '@/router'
+import StatusIndicator from '@/components/StatusIndicator'
+import RouteBreadcrumb from '@/components/RouteBreadcrumb'
 
 const { Header, Sider, Content } = Layout
 

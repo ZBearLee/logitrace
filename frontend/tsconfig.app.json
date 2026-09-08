@@ -16,6 +16,10 @@
     "noEmit": true,
     "jsx": "react-jsx",
 
+    /* Path alias：@ 指向 src，配合 vite resolve.alias。
+       bundler 解析下 paths 相对 tsconfig 目录生效，无需已弃用的 baseUrl */
+    "paths": { "@/*": ["./src/*"] },
+
     /* Linting */
     "noUnusedLocals": true,
     "noUnusedParameters": true,
