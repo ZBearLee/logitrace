@@ -1,0 +1,76 @@
+// 运单领域 / 契约类型：对齐后端 app/api/routes/shipments.py 的真实返回结构。
+// 作为无依赖的单一来源，api / constants / components 均从此处引用，
+// 不反向依赖传输层（api），保持依赖方向单向、无环。
+
+export type ShipmentStatus = 'planned' | 'in_transit' | 'delivered' | 'delayed'
+export type TransportMode = 'sea' | 'air' | 'rail' | 'road'
+
+/** 运单列表项：带起运/目的港 code 与承运商名，前端可直接展示。 */
+export interface ShipmentBrief {
+  id: number
+  shipment_no: string
+  status: string
+  origin_code: string | null
+  dest_code: string | null
+  carrier_name: string | null
+  planned_departure: string | null
+  planned_arrival: string | null
+  actual_departure: string | null
+  actual_arrival: string | null
+  latest_lat: number | null
+  latest_lng: number | null
+  latest_ts: string | null
+}
+
+/** 运输段：一票货的其中一段（港口用 id 关联，前端展示 mode/状态即可）。 */
+export interface LegOut {
+  id: number
+  seq: number
+  mode: string
+  origin_id: number | null
+  dest_id: number | null
+  planned_start: string | null
+  planned_end: string | null
+  status: string
+}
+
+/** 运单详情：在列表项基础上带出各运输段。 */
+export interface ShipmentDetail extends ShipmentBrief {
+  order_id: number | null
+  legs: LegOut[]
+}
+
+/** 里程碑事件（时间轴用）。 */
+export interface MilestoneEventOut {
+  id: number
+  shipment_id: number
+  leg_id: number | null
+  event_type: string
+  occurred_at: string
+  payload_json: string | null
+}
+
+/** 轨迹点（地图用，带经纬度）。 */
+export interface PositionPointOut {
+  id: number
+  leg_id: number
+  lat: number
+  lng: number
+  speed: number | null
+  heading: number | null
+  recorded_at: string
+}
+
+/** 运单分页结果。 */
+export interface PagedShipments {
+  total: number
+  page: number
+  page_size: number
+  items: ShipmentBrief[]
+}
+
+export interface ShipmentsQuery {
+  page?: number
+  page_size?: number
+  status?: string | null
+}
