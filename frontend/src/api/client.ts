@@ -34,7 +34,12 @@ export async function request<T>(
     if (e instanceof DOMException && e.name === 'AbortError') {
       throw new ApiError(0, `请求超时 ${path} (${timeout}ms)`)
     }
-    throw e
+    // HTTP 错误（上面 throw 的 ApiError）原样上抛，保留真实状态码，
+    // 否则 4xx 会被误判成可重试的网络故障
+    if (e instanceof ApiError) throw e
+    // 网络层异常（断网时 fetch 直接 reject）统一归为 status 0，
+    // 保证「错误分类唯一来源」：下游只需判断 ApiError.status 即可分类与决定文案
+    throw new ApiError(0, `网络异常 ${path}`)
   } finally {
     clearTimeout(timer)
   }

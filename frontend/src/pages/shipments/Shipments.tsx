@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
-import { Alert, Button, Select, Space, Table, Tag, Typography } from 'antd'
+import { Select, Space, Table, Tag, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { getShipments } from '@/api/shipments'
 import { STATUS_OPTIONS, statusColor, statusLabel } from '@/constants/shipments'
-import type { PagedShipments, ShipmentBrief, ShipmentStatus } from '@/types/shipments'
+import type { ShipmentBrief, ShipmentStatus } from '@/types/shipments'
+import { usePagedResource } from '@/hooks/usePagedResource'
+import ErrorState from '@/components/feedback/ErrorState'
 
 // 后端时间是 ISO 字符串，列表里只截到分钟，去掉 T 更易读
 const fmt = (s: string | null) => (s ? s.replace('T', ' ').slice(0, 16) : '—')
@@ -66,39 +67,15 @@ const columns: TableColumnsType<ShipmentBrief> = [
 
 export default function Shipments() {
   const navigate = useNavigate()
-  const [data, setData] = useState<ShipmentBrief[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
-  const [status, setStatus] = useState<ShipmentStatus | null>(null)
-  // 初始即 loading：避免 effect 同步阶段调用 setLoading 触发级联渲染
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  const load = useCallback(() => {
-    let alive = true
-    // 注意：effect 同步路径内不做 setState（会触发级联渲染 lint）。
-    // loading 由初始 state 承担；error 在请求成功时清空。
-    getShipments({ page, page_size: pageSize, status })
-      .then((res: PagedShipments) => {
-        if (!alive) return
-        setData(res.items)
-        setTotal(res.total)
-        setError(null)
-      })
-      .catch((e: unknown) => {
-        if (!alive) return
-        setError(e instanceof Error ? e.message : '加载失败')
-      })
-      .finally(() => {
-        if (alive) setLoading(false)
-      })
-    return () => {
-      alive = false
-    }
-  }, [page, pageSize, status])
-
-  useEffect(() => load(), [load])
+  // 列表取数交给统一 hook：分页与筛选状态、空值兜底全部收敛。
+  // 自动重试、断网与页面重新可见的自愈、竞态保护由 useAsyncResource 继承，
+  // 页面零错误处理代码。
+  const { items, total, loading, error, page, pageSize, filters, setFilters, setPage, setPageSize } =
+    usePagedResource<ShipmentBrief, { status: ShipmentStatus | null }>(
+      (p) => getShipments(p),
+      { status: null },
+    )
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -107,43 +84,43 @@ export default function Shipments() {
         placeholder="按状态筛选"
         style={{ width: 160 }}
         options={STATUS_OPTIONS}
-        value={status ?? undefined}
-        onChange={(v) => {
-          setStatus(v ?? null)
-          setPage(1)
-        }}
+        value={filters.status ?? undefined}
+        onChange={(v) => setFilters({ status: v ?? null })}
       />
 
-      {error ? (
-        <Alert
-          type="error"
-          message="运单列表加载失败"
-          description={error}
-          // 重试是事件处理（非 effect），此处 setLoading 不触发该 lint，且能恢复转圈
-          action={<Button onClick={() => { setLoading(true); load() }}>重试</Button>}
-        />
-      ) : (
-        <Table<ShipmentBrief>
-          rowKey="id"
-          columns={columns}
-          dataSource={data}
-          loading={loading}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            onChange: (p, ps) => {
-              setPage(p)
-              setPageSize(ps)
-            },
-          }}
-          onRow={(record) => ({
-            onClick: () => navigate(`/shipments/${record.id}`),
-            style: { cursor: 'pointer' },
-          })}
-        />
+      {/* 有旧数据时优雅降级：只给轻提示，不清空表格内容 */}
+      {error != null && items.length > 0 && (
+        <Typography.Text type="secondary">数据可能不是最新的</Typography.Text>
       )}
+
+      <Table<ShipmentBrief>
+        rowKey="id"
+        columns={columns}
+        dataSource={items}
+        loading={loading}
+        // 取数失败时表格区域显示友好空态（不提供重试按钮），保持布局不塌
+        locale={
+          error != null
+            ? {
+                emptyText: <ErrorState error={error} scope="list" entity="运单" />,
+              }
+            : undefined
+        }
+        pagination={{
+          current: page,
+          pageSize,
+          total,
+          showSizeChanger: true,
+          onChange: (p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+          },
+        }}
+        onRow={(record) => ({
+          onClick: () => navigate(`/shipments/${record.id}`),
+          style: { cursor: 'pointer' },
+        })}
+      />
     </Space>
   )
 }
