@@ -71,11 +71,20 @@ export default function Shipments() {
   // 列表取数交给统一 hook：分页与筛选状态、空值兜底全部收敛。
   // 自动重试、断网与页面重新可见的自愈、竞态保护由 useAsyncResource 继承，
   // 页面零错误处理代码。
-  const { items, total, loading, error, page, pageSize, filters, setFilters, setPage, setPageSize } =
-    usePagedResource<ShipmentBrief, { status: ShipmentStatus | null }>(
-      (p) => getShipments(p),
-      { status: null },
-    )
+  const {
+    items,
+    total,
+    loading,
+    error,
+    page,
+    pageSize,
+    filters,
+    setFilters,
+    setPage,
+    setPageSize,
+  } = usePagedResource<ShipmentBrief, { status: ShipmentStatus | null }>((p) => getShipments(p), {
+    status: null,
+  })
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
