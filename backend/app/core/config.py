@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
 
+    # 实时流心跳间隔（秒）：无业务消息时发一条 ping 保活，并借发送探测客户端存活
+    ws_heartbeat_seconds: int = 30
+
     @property
     def redis_url(self) -> str:
         """Redis 连接串：实时位置流经此读写。"""

@@ -7,10 +7,6 @@
 3. 用大圆插值生成各段轨迹点（position_points）
 4. 生成里程碑事件（milestone_events）
 
-用法：
-  python main.py --count 50          # 追加生成（重复跑会因运单号重复而失败）
-  python main.py --count 50 --reset  # 先清空业务数据再生成，重跑用这个
-
 表结构用 SQLAlchemy 反射（autoload_with），不重复定义 ORM 模型，
 这样模拟器不依赖 backend 代码，符合"计算与 API 解耦"的架构决策。
 """
@@ -40,14 +36,36 @@ ROUTES: list[tuple[str, str, str]] = [
     ("MYPKG", "ZADUR", "sea"),
     ("HKHKG", "NLRTM", "air"),
     ("CNTAO", "DEHAM", "rail"),
+    # 短途公路：内陆仓 → 同港口的门到港运输。段程短、距离近，实时推进时位移
+    # 比例大，能直观看到在途移动；长途干线在全球尺度下每秒位移几乎不可见。
+    ("WCNSHA", "CNSHA", "road"),
+    ("WNLRTM", "NLRTM", "road"),
+    ("WUSLAX", "USLAX", "road"),
+    ("WCNNGB", "CNNGB", "road"),
+    ("WCNSZX", "CNSZX", "road"),
+    ("WUSNYC", "USNYC", "road"),
+    ("WHKHKG", "HKHKG", "road"),
+    ("WSGSIN", "SGSIN", "road"),
+    ("WDEHAM", "DEHAM", "road"),
+    # 长途公路：内陆仓 → 内陆仓（跨省/跨欧亚），距离适中（数百～一千多公里），
+    # 既有足够远的起终点让轨迹在自适应视野下分开，又能保持 1 天段程让移动明显。
+    ("WCNSHA", "WCNSZX", "road"),
+    ("WCNSZX", "WCNSHA", "road"),
+    ("WCNSHA", "WHKHKG", "road"),
+    ("WHKHKG", "WCNSHA", "road"),
+    ("WCNSZX", "WHKHKG", "road"),
+    ("WHKHKG", "WCNSZX", "road"),
+    ("WDEHAM", "WNLRTM", "road"),
+    ("WNLRTM", "WDEHAM", "road"),
+    ("WUSNYC", "WUSLAX", "road"),
 ]
 
 # 各运输方式的典型航程天数与轨迹点数量
-MODE_PROFILE: dict[str, tuple[int, int]] = {
+MODE_PROFILE: dict[str, tuple[float, int]] = {
     "sea": (28, 80),    # 航程天数, 轨迹点数
     "air": (1, 24),
     "rail": (16, 60),
-    "road": (3, 30),
+    "road": (7, 60),     # 7 天：内陆仓间长途公路段程放长，让在途能持续观察、轨迹连线可见
 }
 
 # 货主：订单的归属方。订单是运单的上游，运单靠 order_id 挂到订单上
@@ -171,6 +189,8 @@ def generate(count: int, reset: bool = False) -> dict[str, int]:
             row.code: (row.id, row.lat, row.lng)
             for row in conn.execute(select(locations_t).where(locations_t.c.type == "warehouse"))
         }
+        # 公路运单的端点是内陆仓，干线是港口，取端点时统一按 code 查
+        all_locs = {**ports, **inland}
         carriers_by_mode: dict[str, list[tuple[int, float | None]]] = {}
         for row in conn.execute(select(carriers_t)):
             carriers_by_mode.setdefault(row.mode, []).append((row.id, row.avg_speed))
@@ -185,19 +205,25 @@ def generate(count: int, reset: bool = False) -> dict[str, int]:
 
         for i in range(count):
             origin_code, dest_code, mode = random.choice(ROUTES)
-            if origin_code not in ports or dest_code not in ports:
+            if origin_code not in all_locs or dest_code not in all_locs:
                 continue
             if mode not in carriers_by_mode:
                 continue
 
-            origin_id, o_lat, o_lng = ports[origin_code]
-            dest_id, d_lat, d_lng = ports[dest_code]
+            origin_id, o_lat, o_lng = all_locs[origin_code]
+            dest_id, d_lat, d_lng = all_locs[dest_code]
             carrier_id, avg_speed = random.choice(carriers_by_mode[mode])
             voyage_days, point_count = MODE_PROFILE.get(mode, (10, 40))
             road_speed = carriers_by_mode.get("road", [(0, 55.0)])[0][1]
 
-            # 历史运单：过去 90 天内随机出发；已完成或在途
-            departure = now - timedelta(days=random.randint(5, 90))
+            # 运输中数据要「行程过半、段程长、到货还在未来」才好看且能观察：
+            # 65% 概率造在途运单（出发在过去 voyage_days 的 15%~80% 处，进度中段、
+            # 轨迹连线明显、到货仍在未来数天~数十天），其余造已送达的历史运单。
+            # 不再用「刚出发」那种只到明天、单点轨迹的凑数在途。
+            if random.random() < 0.65:
+                departure = now - timedelta(days=voyage_days * random.uniform(0.15, 0.8))
+            else:
+                departure = now - timedelta(days=voyage_days * random.uniform(1.1, 5.0))
 
             # 门到门需要首尾内陆仓；缺了就退化成单段干线，保证脚本仍能跑
             o_inland = inland.get(f"{INLAND_PREFIX}{origin_code}")
@@ -259,7 +285,7 @@ def generate(count: int, reset: bool = False) -> dict[str, int]:
 
             result = conn.execute(
                 insert(shipments_t).values(
-                    shipment_no=f"SHP-{departure.strftime('%Y%m%d')}-{i + 1:05d}",
+                    shipment_no=f"SHP-{departure.strftime('%Y%m%d')}-{i + 1:05d}-{now.strftime('%H%M%S')}",
                     status=status,
                     order_id=order_id,
                     origin_id=origin_id,

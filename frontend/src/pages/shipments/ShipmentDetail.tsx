@@ -1,5 +1,5 @@
 // 运单详情页：展示单票运单的基本信息、运输链路与里程碑事件。
-import { Fragment } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -15,6 +15,8 @@ import {
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getShipmentDetail, getShipmentEvents, getShipmentPositions } from '@/api/shipments'
+import { connectPositions } from '@/api/ws'
+import type { PositionPointOut } from '@/types/shipments'
 import AMapMap from '@/pages/shipments/components/AMapMap'
 import CanvasMap from '@/pages/shipments/components/CanvasMap'
 import EchartsMap from '@/pages/shipments/components/EchartsMap'
@@ -48,6 +50,52 @@ export default function ShipmentDetail() {
     loading: positionsLoading,
     error: positionsError,
   } = useAsyncResource(() => getShipmentPositions(shipmentId), [shipmentId])
+
+  // 实时位置：REST 给历史快照，WS 给增量，二者拼成地图要的连续轨迹。
+  // 实时点按 leg 归属；leg id 全局唯一，切换运单后旧条目不会被 displayPositions
+  // 取到，因此无需在切单时清理（在 effect 里 setState 会触发级联渲染）。
+  const [liveByLeg, setLiveByLeg] = useState<Record<number, PositionPointOut>>({})
+  const legIdsRef = useRef<Set<number>>(new Set())
+  useEffect(() => {
+    if (detail) legIdsRef.current = new Set(detail.legs.map((l) => l.id))
+  }, [detail])
+
+  useEffect(() => {
+    return connectPositions((msg) => {
+      if (!legIdsRef.current.has(msg.leg_id)) return
+      setLiveByLeg((prev) => ({
+        ...prev,
+        [msg.leg_id]: {
+          id: -msg.leg_id,
+          leg_id: msg.leg_id,
+          lat: msg.lat,
+          lng: msg.lng,
+          speed: msg.speed,
+          heading: msg.heading,
+          recorded_at: msg.ts,
+        },
+      }))
+    })
+  }, [shipmentId])
+
+  const displayPositions = useMemo<PositionPointOut[]>(() => {
+    // 取不到历史轨迹时返回空数组而非 null：地图组件的 points 不接受可空，
+    // 外层已按 positions 判空，这里的 [] 不会被渲染出来。
+    if (!positions) return []
+    const legs = detail?.legs ?? []
+    const byLeg = new Map<number, PositionPointOut[]>()
+    for (const p of positions) {
+      if (!byLeg.has(p.leg_id)) byLeg.set(p.leg_id, [])
+      byLeg.get(p.leg_id)!.push(p)
+    }
+    const out: PositionPointOut[] = []
+    for (const leg of [...legs].sort((a, b) => a.seq - b.seq)) {
+      out.push(...(byLeg.get(leg.id) ?? []))
+      const live = liveByLeg[leg.id]
+      if (live) out.push(live)
+    }
+    return out
+  }, [positions, detail, liveByLeg])
 
   // 外层 Content 不滚动（避免双滚动条），滚动交给页面自身
   return (
@@ -177,7 +225,7 @@ export default function ShipmentDetail() {
                     label: 'ECharts 地理图',
                     children: (
                       <EchartsMap
-                        points={positions}
+                        points={displayPositions}
                         originCode={detail.origin_code}
                         destCode={detail.dest_code}
                       />
@@ -188,7 +236,7 @@ export default function ShipmentDetail() {
                     label: 'Canvas 世界地图',
                     children: (
                       <CanvasMap
-                        points={positions}
+                        points={displayPositions}
                         originCode={detail.origin_code}
                         destCode={detail.dest_code}
                       />
@@ -199,7 +247,7 @@ export default function ShipmentDetail() {
                     label: '高德真实地图',
                     children: (
                       <AMapMap
-                        points={positions}
+                        points={displayPositions}
                         originCode={detail.origin_code}
                         destCode={detail.dest_code}
                       />

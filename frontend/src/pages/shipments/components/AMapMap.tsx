@@ -45,23 +45,45 @@ export default function AMapMap({
   const mapRef = useRef<any>(null)
   const pointsRef = useRef(points)
   pointsRef.current = points
+  const overlayRef = useRef<{ polyline: any; start: any; current: any } | null>(null)
+  const fittedRef = useRef(false)
+  const fitTimerRef = useRef<number | undefined>(undefined)
   const [error, setError] = useState<string | null>(null)
 
   const drawAll = () => {
     const map = mapRef.current
     const AMap = (window as any).AMap
     if (!map || !AMap) return
-    map.clearMap()
     const path = pointsRef.current.map((p) => [p.lng, p.lat])
     if (!path.length) return
-    map.add(new AMap.Polyline({ path, strokeColor: '#ffd666', strokeWeight: 3 }))
-    new AMap.Marker({ position: path[0], map, title: originCode ? `起 ${originCode}` : '起点' })
-    new AMap.Marker({
-      position: path[path.length - 1],
-      map,
-      title: destCode ? `终 ${destCode}` : '终点',
-    })
-    map.setFitView()
+    const start = path[0]
+    const last = path[path.length - 1]
+
+    // 覆盖物复用：实时点推进时只更新数据，不 clearMap 重建。
+    // 否则每秒都要重建折线与标记并重算视野，地图会持续闪烁且卡顿。
+    if (overlayRef.current) {
+      overlayRef.current.polyline.setPath(path)
+      overlayRef.current.start.setPosition(start)
+      overlayRef.current.current.setPosition(last)
+    } else {
+      // 折线用项目主色蓝：原来的浅黄 #ffd666 与高德浅色底图对比度太低，几乎看不清
+      const polyline = new AMap.Polyline({ path, strokeColor: '#1677ff', strokeWeight: 5 })
+      // Marker 通过构造时传 map 直接挂到地图上，AMap v2.0 的 map.add 不支持 Marker
+      const startMarker = new AMap.Marker({
+        position: start,
+        map,
+        title: originCode ? `起 ${originCode}` : '起点',
+      })
+      // 末端是「最新已知位置」，接实时流后即当前位置，并非目的地：
+      // 轨迹只画到当前进度，目的地坐标并未参与绘制，标成终点会误导。
+      const currentMarker = new AMap.Marker({
+        position: last,
+        map,
+        title: destCode ? `当前位置 · 目的地 ${destCode}` : '当前位置',
+      })
+      map.add(polyline)
+      overlayRef.current = { polyline, start: startMarker, current: currentMarker }
+    }
   }
 
   useEffect(() => {
@@ -72,6 +94,17 @@ export default function AMapMap({
         if (!alive || !ref.current) return
         const map = new AMap.Map(ref.current, { viewMode: '2D', zoom: 2, center: [150, 40] })
         mapRef.current = map
+        // 视野自适应只做一次：实时点推进时反复 fit 会让地图不停缩放跳动。
+        // new AMap.Map 后立即 setFitView 会被忽略，所以要挂 complete；但 complete
+        // 依赖瓦片加载，瓦片慢或被拒时可能迟迟不触发，再加超时兜底，避免视野
+        // 永远停在初始的世界级（看不到街道，看起来就像地图坏了）。
+        const fitOnce = () => {
+          if (fittedRef.current) return
+          map.setFitView()
+          fittedRef.current = true
+        }
+        map.on('complete', fitOnce)
+        fitTimerRef.current = window.setTimeout(fitOnce, 1000)
         drawAll()
       })
       .catch((e: unknown) => {
@@ -79,6 +112,7 @@ export default function AMapMap({
       })
     return () => {
       alive = false
+      if (fitTimerRef.current) window.clearTimeout(fitTimerRef.current)
       mapRef.current?.destroy?.()
       mapRef.current = null
     }
