@@ -1,6 +1,6 @@
 // 登录页：校验演示账号，成功后保存令牌并进入系统。
 import { useState } from 'react'
-import { Button, Card, Form, Input, Typography, message } from 'antd'
+import { App, Button, Card, Form, Input, Typography } from 'antd'
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { login } from '@/api/auth'
@@ -15,6 +15,7 @@ interface LoginForm {
 export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
+  const { message } = App.useApp()
   const [submitting, setSubmitting] = useState(false)
 
   // 被守卫拦下来的页面会把原路径带过来，登录后回到那里
