@@ -24,6 +24,9 @@ router = APIRouter(prefix="/shipments", tags=["shipments"])
 # 起运地和目的地都指向 locations，用别名区分两次 join
 Origin = aliased(Location, name="origin")
 Dest = aliased(Location, name="dest")
+# 运输段同样有起止地点，另建一对别名，避免与运单的那对冲突
+LegOrigin = aliased(Location, name="leg_origin")
+LegDest = aliased(Location, name="leg_dest")
 
 
 @router.get("", response_model=PagedShipments)
@@ -90,8 +93,15 @@ async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
 
     s, origin_code, dest_code, carrier_name = row
 
-    legs = (
-        await session.scalars(select(Leg).where(Leg.shipment_id == shipment_id).order_by(Leg.seq))
+    # 段也要 join locations 拿港口 code，否则前端链路只能显示地点 id
+    leg_rows = (
+        await session.execute(
+            select(Leg, LegOrigin.code, LegDest.code)
+            .outerjoin(LegOrigin, Leg.origin_id == LegOrigin.id)
+            .outerjoin(LegDest, Leg.dest_id == LegDest.id)
+            .where(Leg.shipment_id == shipment_id)
+            .order_by(Leg.seq)
+        )
     ).all()
 
     return ShipmentDetail(
@@ -109,7 +119,21 @@ async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
         latest_lng=s.latest_lng,
         latest_ts=s.latest_ts,
         order_id=s.order_id,
-        legs=[LegOut.model_validate(leg) for leg in legs],
+        legs=[
+            LegOut(
+                id=leg.id,
+                seq=leg.seq,
+                mode=leg.mode,
+                origin_id=leg.origin_id,
+                dest_id=leg.dest_id,
+                origin_code=leg_origin_code,
+                dest_code=leg_dest_code,
+                planned_start=leg.planned_start,
+                planned_end=leg.planned_end,
+                status=leg.status,
+            )
+            for leg, leg_origin_code, leg_dest_code in leg_rows
+        ],
     )
 
 

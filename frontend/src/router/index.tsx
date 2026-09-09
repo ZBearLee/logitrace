@@ -11,6 +11,17 @@ export const routes: AppRoute[] = [...dashboardRoutes, ...shipmentsRoutes, ...ex
 
 export const DEFAULT_ROUTE = '/dashboard'
 
+/**
+ * 按 pathname 匹配路由，支持动态段（如 /shipments/:id 匹配 /shipments/12）。
+ * 菜单、Sider 选中态用 path 相等判断即可；面包屑这类需要认出「当前正停在详情页」的场景用这个。
+ */
+export function matchRoute(pathname: string): AppRoute | undefined {
+  return routes.find((r) => {
+    const pattern = r.path.replace(/:[^/]+/g, '[^/]+')
+    return new RegExp(`^${pattern}$`).test(pathname)
+  })
+}
+
 /** 路由渲染封装，App.tsx 只负责挂载 BrowserRouter */
 export function AppRoutes() {
   return (

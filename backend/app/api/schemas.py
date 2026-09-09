@@ -15,6 +15,9 @@ class LegOut(BaseModel):
     mode: str
     origin_id: int | None = None
     dest_id: int | None = None
+    # 起止港口 code：查询时 join locations 带出，前端链路视图可直接展示
+    origin_code: str | None = None
+    dest_code: str | None = None
     planned_start: datetime | None = None
     planned_end: datetime | None = None
     status: str

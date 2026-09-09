@@ -225,6 +225,21 @@ PORTS: list[dict] = [
     },
 ]
 
+# 内陆仓 / 工厂：门到门联运的首尾地点。
+# 由港口程序化派生：每个港口配一个内陆点，坐标向内偏移，避免手工维护 27 条重复数据。
+# 港口增删时这里自动跟随，保证多段联运始终有首末地点可用。
+INLAND: list[dict] = [
+    {
+        "code": f"W{p['code']}",
+        "name": f"{p['name'].removesuffix('港')}内陆仓",
+        "type": "warehouse",
+        "lat": round(p["lat"] + 0.6, 4),
+        "lng": round(p["lng"] - 0.6, 4),
+        "country": p["country"],
+    }
+    for p in PORTS
+]
+
 # 承运商：海运为主，空运 / 铁路 / 陆运各备几家（avg_speed 单位 km/h）
 CARRIERS: list[dict] = [
     {"name": "Maersk 马士基", "mode": "sea", "avg_speed": 35.0},

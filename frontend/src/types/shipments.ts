@@ -29,6 +29,8 @@ export interface LegOut {
   mode: string
   origin_id: number | null
   dest_id: number | null
+  origin_code: string | null
+  dest_code: string | null
   planned_start: string | null
   planned_end: string | null
   status: string

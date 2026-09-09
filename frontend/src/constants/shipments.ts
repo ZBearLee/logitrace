@@ -32,6 +32,14 @@ export const MODE_LABEL: Record<TransportMode, string> = {
   road: '公路',
 }
 
+/** 运输模式对应的 antd Tag 颜色 */
+export const MODE_COLOR: Record<TransportMode, string> = {
+  sea: 'blue',
+  air: 'cyan',
+  rail: 'purple',
+  road: 'green',
+}
+
 /** 状态取中文，未知值兜底原样返回 */
 export const statusLabel = (s: string): string => STATUS_LABEL[s as ShipmentStatus] ?? s
 
@@ -40,3 +48,20 @@ export const statusColor = (s: string): string => STATUS_COLOR[s as ShipmentStat
 
 /** 模式取中文，未知值兜底原样返回 */
 export const modeLabel = (m: string): string => MODE_LABEL[m as TransportMode] ?? m
+
+/** 模式取颜色，未知值兜底 'default' */
+export const modeColor = (m: string): string => MODE_COLOR[m as TransportMode] ?? 'default'
+
+/** 里程碑事件类型中文文案（后端 event_type 为英文枚举） */
+export const EVENT_LABEL: Record<string, string> = {
+  picked_up: '提货',
+  loaded: '装运',
+  departed: '离港',
+  arrived: '到港',
+  delivered: '签收',
+  delayed: '延误',
+  stalled: '滞留',
+}
+
+/** 事件类型取中文，未知值兜底原样返回 */
+export const eventLabel = (e: string): string => EVENT_LABEL[e] ?? e
