@@ -1,6 +1,9 @@
 // 方案 C：高德真实地图。动态加载高德 JS API（不引 npm 包），key 从 .env 读，无 key 降级提示。
 // 注意：高德/天地图用 GCJ-02 坐标，后端轨迹是 WGS-84，真实地图会有几十~几百米偏移；
 // 演示看不出，要准得做 WGS-84→GCJ-02 偏移转换（后续可加）。
+// 上线前约束：高德 key 为公开可见（JS API 必现于前端），需在高德控制台为该 key 配域名白名单，
+// 填线上域名（不含协议与端口），不要填 localhost 或服务器 IP；未加白的来源请求会被拒。
+// dev / prod 建议用两个 key，dev key 不设或宽松白名单，prod key 绑死线上域名。
 import { useEffect, useRef, useState } from 'react'
 import { Alert } from 'antd'
 import type { PositionPointOut } from '@/types/shipments'
@@ -29,7 +32,15 @@ function loadAMap(): Promise<any> {
   return amapPromise
 }
 
-export default function AMapMap({ points }: { points: PositionPointOut[] }) {
+export default function AMapMap({
+  points,
+  originCode,
+  destCode,
+}: {
+  points: PositionPointOut[]
+  originCode?: string | null
+  destCode?: string | null
+}) {
   const ref = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const pointsRef = useRef(points)
@@ -44,8 +55,12 @@ export default function AMapMap({ points }: { points: PositionPointOut[] }) {
     const path = pointsRef.current.map((p) => [p.lng, p.lat])
     if (!path.length) return
     map.add(new AMap.Polyline({ path, strokeColor: '#ffd666', strokeWeight: 3 }))
-    new AMap.Marker({ position: path[0], map, title: '起点' })
-    new AMap.Marker({ position: path[path.length - 1], map, title: '终点' })
+    new AMap.Marker({ position: path[0], map, title: originCode ? `起 ${originCode}` : '起点' })
+    new AMap.Marker({
+      position: path[path.length - 1],
+      map,
+      title: destCode ? `终 ${destCode}` : '终点',
+    })
     map.setFitView()
   }
 
@@ -73,7 +88,7 @@ export default function AMapMap({ points }: { points: PositionPointOut[] }) {
   useEffect(() => {
     drawAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points])
+  }, [points, originCode, destCode])
 
   if (!KEY) {
     return (

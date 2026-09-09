@@ -1,6 +1,17 @@
 // 运单详情页：展示单票运单的基本信息、运输链路与里程碑事件。
 import { Fragment } from 'react'
-import { Button, Card, Descriptions, Skeleton, Space, Tabs, Tag, Timeline, Typography } from 'antd'
+import {
+  Button,
+  Card,
+  Descriptions,
+  Skeleton,
+  Space,
+  Tabs,
+  Tag,
+  Timeline,
+  Tooltip,
+  Typography,
+} from 'antd'
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getShipmentDetail, getShipmentEvents, getShipmentPositions } from '@/api/shipments'
@@ -77,7 +88,17 @@ export default function ShipmentDetail() {
                 { key: 'order', label: '关联订单', children: detail.order_no ?? '—' },
                 { key: 'customer', label: '客户名称', children: detail.customer_name ?? '—' },
                 { key: 'pd', label: '计划出发', children: fmt(detail.planned_departure) },
-                { key: 'pa', label: '计划到达', children: fmt(detail.planned_arrival) },
+                {
+                  key: 'pa',
+                  // 现在还没有 ETA 预测模型，用计划到达充当 ETA 基线，
+                  // 悬浮说明它的来源，避免被当成「系统算出来的预测值」
+                  label: (
+                    <Tooltip title="当前以计划到达作为 ETA 基线，后期接入预测模型后换成模型输出">
+                      <span style={{ borderBottom: '1px dashed #bfbfbf' }}>计划到达</span>
+                    </Tooltip>
+                  ),
+                  children: fmt(detail.planned_arrival),
+                },
                 { key: 'ad', label: '实际出发', children: fmt(detail.actual_departure) },
                 { key: 'aa', label: '实际到达', children: fmt(detail.actual_arrival) },
               ]}
@@ -154,17 +175,35 @@ export default function ShipmentDetail() {
                   {
                     key: 'echarts',
                     label: 'ECharts 地理图',
-                    children: <EchartsMap points={positions} />,
+                    children: (
+                      <EchartsMap
+                        points={positions}
+                        originCode={detail.origin_code}
+                        destCode={detail.dest_code}
+                      />
+                    ),
                   },
                   {
                     key: 'canvas',
                     label: 'Canvas 世界地图',
-                    children: <CanvasMap points={positions} />,
+                    children: (
+                      <CanvasMap
+                        points={positions}
+                        originCode={detail.origin_code}
+                        destCode={detail.dest_code}
+                      />
+                    ),
                   },
                   {
                     key: 'amap',
                     label: '高德真实地图',
-                    children: <AMapMap points={positions} />,
+                    children: (
+                      <AMapMap
+                        points={positions}
+                        originCode={detail.origin_code}
+                        destCode={detail.dest_code}
+                      />
+                    ),
                   },
                 ]}
               />

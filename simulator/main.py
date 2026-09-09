@@ -7,6 +7,10 @@
 3. 用大圆插值生成各段轨迹点（position_points）
 4. 生成里程碑事件（milestone_events）
 
+用法：
+  python main.py --count 50          # 追加生成（重复跑会因运单号重复而失败）
+  python main.py --count 50 --reset  # 先清空业务数据再生成，重跑用这个
+
 表结构用 SQLAlchemy 反射（autoload_with），不重复定义 ORM 模型，
 这样模拟器不依赖 backend 代码，符合"计算与 API 解耦"的架构决策。
 """
@@ -133,8 +137,12 @@ def build_points(seg: Seg, leg_id: int, progress: float, now: datetime) -> list[
     return points
 
 
-def generate(count: int) -> dict[str, int]:
-    """批量生成历史运单，返回各类数据的写入条数。"""
+def generate(count: int, reset: bool = False) -> dict[str, int]:
+    """批量生成历史运单，返回各类数据的写入条数。
+
+    reset=True 时先清空业务数据：脚本本身是追加式的，
+    直接重跑会撞 shipment_no 唯一索引。
+    """
     engine = create_engine(settings.mysql_dsn_sync, future=True)
     metadata = MetaData()
     locations_t = Table("locations", metadata, autoload_with=engine)
@@ -148,6 +156,12 @@ def generate(count: int) -> dict[str, int]:
     stats = {"orders": 0, "shipments": 0, "legs": 0, "positions": 0, "events": 0}
 
     with engine.begin() as conn:
+        if reset:
+            # 从依赖方往被依赖方删，顺序反了会撞外键：
+            # events/points → legs → shipments → orders
+            for table in (events_t, points_t, legs_t, shipments_t, orders_t):
+                conn.execute(table.delete())
+
         # 港口与内陆仓分开建索引：多段联运要用 type 区分干线与短驳的起终点
         ports = {
             row.code: (row.id, row.lat, row.lng)
@@ -366,9 +380,14 @@ def generate(count: int) -> dict[str, int]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="LogiTrace 模拟器 v1：批量生成历史运单")
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT, help="生成运单数量")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="先清空业务数据（events/points/legs/shipments/orders）再生成，重跑时用",
+    )
     args = parser.parse_args()
 
-    stats = generate(args.count)
+    stats = generate(args.count, args.reset)
     print("生成完成：")
     for key, value in stats.items():
         print(f"  {key}: {value}")

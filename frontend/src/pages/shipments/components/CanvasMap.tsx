@@ -42,6 +42,8 @@ function drawTrack(
   points: PositionPointOut[],
   w: number,
   h: number,
+  startLabel: string,
+  endLabel: string,
 ) {
   ctx.strokeStyle = '#ffd666'
   ctx.lineWidth = 2
@@ -63,17 +65,33 @@ function drawTrack(
   ctx.stroke()
 
   if (points.length) {
+    const [sx, sy] = project(points[0].lng, points[0].lat, w, h)
+    const [ex, ey] = project(points[points.length - 1].lng, points[points.length - 1].lat, w, h)
     ctx.fillStyle = '#52c41a'
-    for (const p of [points[0], points[points.length - 1]]) {
-      const [x, y] = project(p.lng, p.lat, w, h)
-      ctx.beginPath()
-      ctx.arc(x, y, 4, 0, Math.PI * 2)
-      ctx.fill()
-    }
+    ctx.beginPath()
+    ctx.arc(sx, sy, 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.fillStyle = '#ff4d4f'
+    ctx.beginPath()
+    ctx.arc(ex, ey, 4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.font = '12px sans-serif'
+    ctx.fillStyle = '#52c41a'
+    ctx.fillText(startLabel, sx + 8, sy - 8)
+    ctx.fillStyle = '#ff4d4f'
+    ctx.fillText(endLabel, ex + 8, ey - 8)
   }
 }
 
-export default function CanvasMap({ points }: { points: PositionPointOut[] }) {
+export default function CanvasMap({
+  points,
+  originCode,
+  destCode,
+}: {
+  points: PositionPointOut[]
+  originCode?: string | null
+  destCode?: string | null
+}) {
   const { geo } = useWorldGeo()
   const ref = useRef<HTMLCanvasElement>(null)
 
@@ -88,8 +106,15 @@ export default function CanvasMap({ points }: { points: PositionPointOut[] }) {
     ctx.fillStyle = '#0b1f33'
     ctx.fillRect(0, 0, w, h)
     if (geo) drawCoast(ctx, geo, w, h)
-    drawTrack(ctx, points, w, h)
-  }, [geo, points])
+    drawTrack(
+      ctx,
+      points,
+      w,
+      h,
+      originCode ? `起 ${originCode}` : '起',
+      destCode ? `终 ${destCode}` : '终',
+    )
+  }, [geo, points, originCode, destCode])
 
   return (
     <canvas

@@ -5,7 +5,15 @@ import { Spin } from 'antd'
 import { useWorldGeo } from '@/pages/shipments/components/worldGeo'
 import type { PositionPointOut } from '@/types/shipments'
 
-export default function EchartsMap({ points }: { points: PositionPointOut[] }) {
+export default function EchartsMap({
+  points,
+  originCode,
+  destCode,
+}: {
+  points: PositionPointOut[]
+  originCode?: string | null
+  destCode?: string | null
+}) {
   const { geo, loading } = useWorldGeo()
   const ref = useRef<HTMLDivElement>(null)
   const chartRef = useRef<echarts.ECharts | null>(null)
@@ -64,16 +72,36 @@ export default function EchartsMap({ points }: { points: PositionPointOut[] }) {
               {
                 type: 'effectScatter' as const,
                 coordinateSystem: 'geo' as const,
-                data: [coords[0], coords[coords.length - 1]],
+                data: [coords[0]],
                 symbolSize: 12,
                 itemStyle: { color: '#52c41a' },
-                label: { show: true, formatter: '起·终', position: 'right' as const },
+                label: {
+                  show: true,
+                  formatter: originCode ? `起 ${originCode}` : '起',
+                  position: 'right' as const,
+                  color: '#52c41a',
+                },
+                zlevel: 2,
+              },
+              {
+                type: 'effectScatter' as const,
+                coordinateSystem: 'geo' as const,
+                data: [coords[coords.length - 1]],
+                symbolSize: 12,
+                itemStyle: { color: '#ff4d4f' },
+                label: {
+                  show: true,
+                  formatter: destCode ? `终 ${destCode}` : '终',
+                  position: 'right' as const,
+                  color: '#ff4d4f',
+                },
+                zlevel: 2,
               },
             ]
           : []),
       ],
     } as any)
-  }, [points, geo])
+  }, [points, geo, originCode, destCode])
 
   if (loading || !geo) return <Spin tip="加载世界地图…" />
   return <div ref={ref} style={{ width: '100%', height: 480 }} />
