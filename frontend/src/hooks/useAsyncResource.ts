@@ -84,19 +84,14 @@ export function useAsyncResource<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, tick])
 
-  // 网络恢复 / 页面重新可见时自动重取。
-  // 仅在处于错误状态时监听，避免正常情况下切回页面也发请求。
+  // 仅在取数失败后监听「网络恢复」，重取一次。
+  // 不再监听页面可见性：切回/离开标签页就重打接口，会让失败状态下持续发请求。
   useEffect(() => {
     if (error == null) return
     const onOnline = () => retry()
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') retry()
-    }
     window.addEventListener('online', onOnline)
-    document.addEventListener('visibilitychange', onVisible)
     return () => {
       window.removeEventListener('online', onOnline)
-      document.removeEventListener('visibilitychange', onVisible)
     }
   }, [error, retry])
 
