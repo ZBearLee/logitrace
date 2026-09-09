@@ -39,6 +39,10 @@ export interface LegOut {
 /** 运单详情：在列表项基础上带出各运输段。 */
 export interface ShipmentDetail extends ShipmentBrief {
   order_id: number | null
+  /** 订单号：后端 join orders 带出，页面展示这个而非裸 id */
+  order_no: string | null
+  /** 货主：同属订单信息，从 orders 带出 */
+  customer_name: string | null
   legs: LegOut[]
 }
 

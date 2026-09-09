@@ -47,6 +47,9 @@ class ShipmentDetail(ShipmentBrief):
     """运单详情：在列表项基础上带出各运输段。"""
 
     order_id: int | None = None
+    # 订单号与货主：join orders 带出，前端直接展示（只给 order_id 页面上是无意义的数字）
+    order_no: str | None = None
+    customer_name: str | None = None
     legs: list[LegOut] = []
 
 

@@ -46,6 +46,20 @@ MODE_PROFILE: dict[str, tuple[int, int]] = {
     "road": (3, 30),
 }
 
+# 货主：订单的归属方。订单是运单的上游，运单靠 order_id 挂到订单上
+CUSTOMERS: list[str] = [
+    "华为技术有限公司",
+    "比亚迪股份有限公司",
+    "海尔智家股份有限公司",
+    "宁德时代新能源科技",
+    "美的集团股份有限公司",
+    "立讯精密工业股份",
+    "TCL 科技集团",
+    "小米通讯技术有限公司",
+    "格力电器股份有限公司",
+    "歌尔股份有限公司",
+]
+
 DEFAULT_COUNT = 50
 
 # 首末端（内陆仓 ↔ 港口）是公路短驳：固定 1 天、点数比干线少，
@@ -55,6 +69,11 @@ DRAYAGE_POINTS = 12
 
 # 内陆仓 code 的派生规则，与 seed_data.INLAND 保持一致（港口 code 前加 W）
 INLAND_PREFIX = "W"
+
+# 拆单：一单可拆多票运单。SPLIT_RATE 是复用已有订单的概率，
+# MAX_SHIPMENTS_PER_ORDER 限制单张订单最多挂几票，避免某张订单吃掉全部运单
+SPLIT_RATE = 0.4
+MAX_SHIPMENTS_PER_ORDER = 3
 
 
 class Seg(NamedTuple):
@@ -120,12 +139,13 @@ def generate(count: int) -> dict[str, int]:
     metadata = MetaData()
     locations_t = Table("locations", metadata, autoload_with=engine)
     carriers_t = Table("carriers", metadata, autoload_with=engine)
+    orders_t = Table("orders", metadata, autoload_with=engine)
     shipments_t = Table("shipments", metadata, autoload_with=engine)
     legs_t = Table("legs", metadata, autoload_with=engine)
     points_t = Table("position_points", metadata, autoload_with=engine)
     events_t = Table("milestone_events", metadata, autoload_with=engine)
 
-    stats = {"shipments": 0, "legs": 0, "positions": 0, "events": 0}
+    stats = {"orders": 0, "shipments": 0, "legs": 0, "positions": 0, "events": 0}
 
     with engine.begin() as conn:
         # 港口与内陆仓分开建索引：多段联运要用 type 区分干线与短驳的起终点
@@ -143,6 +163,11 @@ def generate(count: int) -> dict[str, int]:
 
         # MySQL 的 DateTime 列不带时区，统一存 UTC 的 naive datetime
         now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # 订单数少于运单数（拆单时多票共用一张），所以订单序号单独累加，不复用运单下标
+        # order_pool 每项为 [order_id, 已挂运单数]，用于挑还能挂票的订单
+        order_seq = 0
+        order_pool: list[list[int]] = []
 
         for i in range(count):
             origin_code, dest_code, mode = random.choice(ROUTES)
@@ -197,10 +222,32 @@ def generate(count: int) -> dict[str, int]:
 
             distance_km = haversine_km(o_lat, o_lng, d_lat, d_lng)
 
+            # 订单是运单的上游：先把 order_id 挂上，否则域模型「订单 → 运单」这层就断了。
+            # 按 SPLIT_RATE 复用还能挂票的订单，让部分订单拆成多票运单
+            reusable = [o for o in order_pool if o[1] < MAX_SHIPMENTS_PER_ORDER]
+            if reusable and random.random() < SPLIT_RATE:
+                slot = random.choice(reusable)
+                slot[1] += 1
+                order_id = slot[0]
+            else:
+                order_seq += 1
+                order_result = conn.execute(
+                    insert(orders_t).values(
+                        order_no=f"ORD-{departure.strftime('%Y%m%d')}-{order_seq:05d}",
+                        customer_name=random.choice(CUSTOMERS),
+                        status="created",
+                        created_at=now,
+                    )
+                )
+                order_id = order_result.inserted_primary_key[0]
+                order_pool.append([order_id, 1])
+                stats["orders"] += 1
+
             result = conn.execute(
                 insert(shipments_t).values(
                     shipment_no=f"SHP-{departure.strftime('%Y%m%d')}-{i + 1:05d}",
                     status=status,
+                    order_id=order_id,
                     origin_id=origin_id,
                     dest_id=dest_id,
                     carrier_id=carrier_id,

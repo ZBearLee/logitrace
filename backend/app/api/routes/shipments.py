@@ -15,7 +15,7 @@ from app.api.schemas import (
     ShipmentDetail,
 )
 from app.db.models.reference import Carrier, Location
-from app.db.models.shipment import Leg, Shipment
+from app.db.models.shipment import Leg, Order, Shipment
 from app.db.models.tracking import MilestoneEvent, PositionPoint
 from app.db.session import SessionDep
 
@@ -81,17 +81,18 @@ async def list_shipments(
 async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
     """运单详情：带出各运输段（legs）。"""
     stmt = (
-        select(Shipment, Origin.code, Dest.code, Carrier.name)
+        select(Shipment, Origin.code, Dest.code, Carrier.name, Order.order_no, Order.customer_name)
         .outerjoin(Origin, Shipment.origin_id == Origin.id)
         .outerjoin(Dest, Shipment.dest_id == Dest.id)
         .outerjoin(Carrier, Shipment.carrier_id == Carrier.id)
+        .outerjoin(Order, Shipment.order_id == Order.id)
         .where(Shipment.id == shipment_id)
     )
     row = (await session.execute(stmt)).first()
     if row is None:
         raise HTTPException(status_code=404, detail="运单不存在")
 
-    s, origin_code, dest_code, carrier_name = row
+    s, origin_code, dest_code, carrier_name, order_no, customer_name = row
 
     # 段也要 join locations 拿港口 code，否则前端链路只能显示地点 id
     leg_rows = (
@@ -119,6 +120,8 @@ async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
         latest_lng=s.latest_lng,
         latest_ts=s.latest_ts,
         order_id=s.order_id,
+        order_no=order_no,
+        customer_name=customer_name,
         legs=[
             LegOut(
                 id=leg.id,
