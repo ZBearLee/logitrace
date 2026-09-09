@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { ConfigProvider, Empty } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import 'antd/dist/reset.css'
+import '@/styles/global.css'
 import App from '@/App'
 import ErrorBoundary from '@/components/feedback/ErrorBoundary'
 

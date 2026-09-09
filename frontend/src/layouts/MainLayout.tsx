@@ -84,6 +84,11 @@ export default function MainLayout() {
             margin: current?.fullscreen ? 0 : 16,
             padding: current?.fullscreen ? 0 : undefined,
             position: 'relative',
+            // 内容区不滚动：滚动交给表格内部（Table 的 scroll.y），避免内外双滚动条。
+            // minHeight:0 是必需的——flex item 默认 min-height:auto 会被内容撑高，
+            // 从而顶破外层 100vh 容器，导致整个页面（连侧边栏和头部）一起滚。
+            overflow: 'hidden',
+            minHeight: 0,
           }}
         >
           <Outlet />

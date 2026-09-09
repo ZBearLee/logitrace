@@ -107,6 +107,10 @@ export default function Shipments() {
         columns={columns}
         dataSource={items}
         loading={loading}
+        // 表头固定、表体内部滚动，分页条留在表格下方不随滚动。
+        // 高度按视口算出：扣掉 Header(48) + Content 外边距(32) + 筛选器(32)
+        // + Space 间距(16) + 表头与分页约(112)，换算得 240px。
+        scroll={{ y: 'calc(100vh - 240px)' }}
         // 取数失败时表格区域显示友好空态（不提供重试按钮），保持布局不塌
         locale={
           error != null
