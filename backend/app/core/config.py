@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     redis_db: int = 0
 
+    @property
+    def redis_url(self) -> str:
+        """Redis 连接串：实时位置流经此读写。"""
+        return f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
     # AI（通用命名，零厂商字眼；无 Key 时相关功能降级）
     ai_api_key: str = ""
     ai_base_url: str = ""

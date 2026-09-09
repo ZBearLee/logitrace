@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.api.routes import auth, health, orders, shipments
+from app.api.routes import auth, health, orders, realtime, shipments
 
 app = FastAPI(
     title="LogiTrace API",
@@ -15,3 +15,4 @@ app.include_router(health.router)
 app.include_router(auth.router)
 app.include_router(shipments.router)
 app.include_router(orders.router)
+app.include_router(realtime.router)
