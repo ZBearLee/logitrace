@@ -2,6 +2,8 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import type { AppRoute } from '@/router/types'
 import MainLayout from '@/layouts/MainLayout'
+import Login from '@/pages/login/Login'
+import RequireAuth from '@/components/RequireAuth'
 import { dashboardRoutes } from '@/router/modules/dashboard'
 import { shipmentsRoutes } from '@/router/modules/shipments'
 import { exceptionsRoutes } from '@/router/modules/exceptions'
@@ -26,7 +28,16 @@ export function matchRoute(pathname: string): AppRoute | undefined {
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<MainLayout />}>
+      {/* 登录页在守卫之外：它本身就是未登录时的去处 */}
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <MainLayout />
+          </RequireAuth>
+        }
+      >
         <Route index element={<Navigate to={DEFAULT_ROUTE} replace />} />
         {routes.map((r) => (
           <Route key={r.path} path={r.path.replace(/^\//, '')} element={r.element} />

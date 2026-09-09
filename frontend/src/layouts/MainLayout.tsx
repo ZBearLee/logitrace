@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Button, Layout, Menu } from 'antd'
-import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { Button, Layout, Menu, Space, Typography } from 'antd'
+import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { routes } from '@/router'
+import { clearSession, getUser } from '@/utils/auth'
 import StatusIndicator from '@/components/StatusIndicator'
 import RouteBreadcrumb from '@/components/RouteBreadcrumb'
 
@@ -11,6 +12,7 @@ const { Header, Sider, Content } = Layout
 export default function MainLayout() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
+  const user = getUser()
 
   // 当前路由元信息：大屏页让 Sider 默认折叠，给地图让位；数据页默认展开
   const current = routes.find((r) => r.path === pathname)
@@ -77,7 +79,20 @@ export default function MainLayout() {
             />
             <RouteBreadcrumb />
           </div>
-          <StatusIndicator />
+          <Space size={12}>
+            <StatusIndicator />
+            {user && <Typography.Text type="secondary">{user.username}</Typography.Text>}
+            <Button
+              type="text"
+              icon={<LogoutOutlined />}
+              onClick={() => {
+                clearSession()
+                navigate('/login', { replace: true })
+              }}
+            >
+              退出
+            </Button>
+          </Space>
         </Header>
         <Content
           style={{

@@ -99,3 +99,26 @@ class OrderOut(BaseModel):
     customer_name: str
     status: str
     created_at: datetime
+
+
+class LoginIn(BaseModel):
+    """登录入参。"""
+
+    username: str
+    password: str
+
+
+class LoginOut(BaseModel):
+    """登录结果：令牌 + 当前账号信息，前端据此渲染头部与做路由守卫。"""
+
+    access_token: str
+    token_type: str = "bearer"
+    username: str
+    role: str
+
+
+class UserClaims(BaseModel):
+    """从令牌解析出的身份，供受保护接口声明依赖。"""
+
+    username: str
+    role: str

@@ -1,5 +1,8 @@
-// 统一请求层：所有接口走 request()，集中处理 baseURL / 错误 / 将来鉴权
+// 统一请求层：所有接口走 request()，集中处理 baseURL / 鉴权头 / 错误分类
+import { clearSession, getToken } from '@/utils/auth'
+
 const BASE = '/api'
+const LOGIN_PATH = '/auth/login'
 
 export class ApiError extends Error {
   declare status: number
@@ -19,12 +22,23 @@ export async function request<T>(
   const timeout = options?.timeout ?? DEFAULT_TIMEOUT
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeout)
+  const token = getToken()
 
   try {
     const res = await fetch(`${BASE}${path}`, {
       ...options,
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
       signal: options?.signal ?? controller.signal,
     })
+    // 登录接口自身的 401 是「账号密码不对」，要留给页面提示，不能当成会话过期跳走
+    if (res.status === 401 && path !== LOGIN_PATH) {
+      clearSession()
+      window.location.assign('/login')
+      throw new ApiError(401, '登录已失效，请重新登录')
+    }
     if (!res.ok) {
       throw new ApiError(res.status, `请求失败 ${path}: ${res.status}`)
     }
@@ -55,4 +69,4 @@ export function getHealth() {
 }
 
 // 业务闭环阶段在此追加：getShipments / getExceptions ... 均复用 request()
-// 将来需要鉴权时，在 request() 内统一注入 Authorization 头即可
+// 鉴权头已在 request() 内统一注入，新增接口无需各自处理

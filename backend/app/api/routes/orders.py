@@ -1,13 +1,14 @@
 """订单接口。"""
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select
 
+from app.api.deps import current_user
 from app.api.schemas import OrderOut
 from app.db.models.shipment import Order
 from app.db.session import SessionDep
 
-router = APIRouter(prefix="/orders", tags=["orders"])
+router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(current_user)])
 
 
 @router.get("", response_model=list[OrderOut])

@@ -2,10 +2,11 @@
 
 from datetime import datetime
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 
+from app.api.deps import current_user
 from app.api.schemas import (
     LegOut,
     MilestoneEventOut,
@@ -19,7 +20,7 @@ from app.db.models.shipment import Leg, Order, Shipment
 from app.db.models.tracking import MilestoneEvent, PositionPoint
 from app.db.session import SessionDep
 
-router = APIRouter(prefix="/shipments", tags=["shipments"])
+router = APIRouter(prefix="/shipments", tags=["shipments"], dependencies=[Depends(current_user)])
 
 # 起运地和目的地都指向 locations，用别名区分两次 join
 Origin = aliased(Location, name="origin")

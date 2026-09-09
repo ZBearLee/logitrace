@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from app.api.routes import health, orders, shipments
+from app.api.routes import auth, health, orders, shipments
 
 app = FastAPI(
     title="LogiTrace API",
@@ -10,6 +10,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# health 与 auth 保持公开：前者给探活用，后者是拿令牌的入口
 app.include_router(health.router)
+app.include_router(auth.router)
 app.include_router(shipments.router)
 app.include_router(orders.router)
