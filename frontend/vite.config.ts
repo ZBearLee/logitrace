@@ -1,9 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import { createRequire } from 'node:module'
 import { fileURLToPath, URL } from 'node:url'
 
+// CJS 互操作：该插件是 CJS 产物（module.exports = { default: fn }），
+// 本配置走 nodenext 语义，ESM 的 default 导入不会自动展开，直接用 require 取 .default
+const require = createRequire(import.meta.url)
+const cesium = require('vite-plugin-cesium').default
+
 export default defineConfig({
-  plugins: [react()],
+  // cesium 插件负责拷贝 Cesium 的 Workers/Assets/Widgets/ThirdParty 静态资源，
+  // 并注入 CESIUM_BASE_URL：瓦片与 Web Worker 都按这个路径取资源，缺了会白屏。
+  plugins: [react(), cesium()],
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
@@ -31,5 +39,9 @@ export default defineConfig({
         rewrite: (path) => path.replace(/^\/amap/, ''),
       },
     },
+  },
+  build: {
+    // Cesium 单包体积远超 Vite 默认 500kB 告警阈值，调高避免无意义告警刷屏
+    chunkSizeWarningLimit: 4096,
   },
 })
