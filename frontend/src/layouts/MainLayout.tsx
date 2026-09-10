@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react'
 import { Button, Layout, Menu, Space, Typography } from 'antd'
 import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { routes } from '@/router'
+import { matchRoute, routes } from '@/router'
 import { clearSession, getUser } from '@/utils/auth'
 import StatusIndicator from '@/components/StatusIndicator'
 import RouteBreadcrumb from '@/components/RouteBreadcrumb'
+import EventNotifier from '@/components/EventNotifier'
 
 const { Header, Sider, Content } = Layout
 
@@ -15,7 +16,9 @@ export default function MainLayout() {
   const user = getUser()
 
   // 当前路由元信息：大屏页让 Sider 默认折叠，给地图让位；数据页默认展开
-  const current = routes.find((r) => r.path === pathname)
+  // 用 matchRoute 而非 routes.find 精确匹配：详情页 /shipments/12 要命中 /shipments/:id，
+  // 否则 current 为 undefined，侧边栏选中态会丢。
+  const current = matchRoute(pathname)
 
   // 折叠状态受路由驱动：切到大屏页自动折叠，切回数据页自动展开；
   // 同页内手动展开/收起后保持，直到再次切换路由
@@ -32,6 +35,7 @@ export default function MainLayout() {
 
   return (
     <Layout style={{ height: '100vh' }}>
+      <EventNotifier />
       <Sider
         theme="dark"
         collapsed={collapsed}
@@ -55,7 +59,9 @@ export default function MainLayout() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[pathname]}
+          // 选中态用匹配到的路由 path（/shipments），而不是原始 pathname（/shipments/12），
+          // 否则详情页没有任何菜单项被选中。
+          selectedKeys={[current?.path ?? pathname]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />

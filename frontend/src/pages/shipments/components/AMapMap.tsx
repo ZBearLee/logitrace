@@ -85,7 +85,7 @@ export default function AMapMap({
       fitKeyRef.current = fitKey
       fittedRef.current = false
       if (mapReadyRef.current) {
-        map.setFitView()
+        map.setFitView(null, true)
         fittedRef.current = true
       }
     }
@@ -203,7 +203,9 @@ export default function AMapMap({
         // 永远停在初始的世界级（看不到街道，看起来就像地图坏了）。
         const fitOnce = () => {
           if (fittedRef.current) return
-          map.setFitView()
+          // 第二参 immediately=true 关闭 setFitView 默认的平移/缩放过渡动画：
+          // 首屏与切单直接落位到轨迹范围，避免“先移动再放大”的过渡效果。
+          map.setFitView(null, true)
           fittedRef.current = true
           mapReadyRef.current = true
         }

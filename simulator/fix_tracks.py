@@ -11,7 +11,16 @@
 import argparse
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import MetaData, Table, create_engine, delete, func, select, text, update
+from sqlalchemy import (
+    MetaData,
+    Table,
+    create_engine,
+    delete,
+    func,
+    select,
+    text,
+    update,
+)
 
 from config import settings
 from geo import bearing_deg, interpolate_great_circle
@@ -32,9 +41,17 @@ def leg_progress(start: datetime, end: datetime, now: datetime) -> float:
     return (now - start).total_seconds() / total
 
 
-def build_leg_points(leg_id: int, o_lat: float, o_lng: float, d_lat: float,
-                     d_lng: float, start: datetime, end: datetime,
-                     target_t: float, now: datetime) -> list[dict]:
+def build_leg_points(
+    leg_id: int,
+    o_lat: float,
+    o_lng: float,
+    d_lat: float,
+    d_lng: float,
+    start: datetime,
+    end: datetime,
+    target_t: float,
+    now: datetime,
+) -> list[dict]:
     """沿大圆插值出 0→target_t 的点；target_t=1 即延伸到终点，保证实线完整。"""
     days = (end - start).total_seconds() / 86400
     total = max(16, min(80, int(days * 3) + 16))
@@ -80,31 +97,41 @@ def main() -> None:
     dest = locations_t.alias("dest")
 
     now = _utcnow()
-    print(f"基准时间 {now.isoformat()}Z，{'写库模式' if args.apply else '预演模式（加 --apply 才写）'}")
+    print(
+        f"基准时间 {now.isoformat()}Z，{'写库模式' if args.apply else '预演模式（加 --apply 才写）'}"
+    )
 
     with engine.begin() as conn:
-        legs = conn.execute(
-            select(
-                legs_t.c.id,
-                legs_t.c.shipment_id,
-                legs_t.c.seq,
-                legs_t.c.status,
-                legs_t.c.planned_start,
-                legs_t.c.planned_end,
-                legs_t.c.origin_id,
-                legs_t.c.dest_id,
-                origin.c.lat.label("o_lat"),
-                origin.c.lng.label("o_lng"),
-                dest.c.lat.label("d_lat"),
-                dest.c.lng.label("d_lng"),
+        legs = (
+            conn.execute(
+                select(
+                    legs_t.c.id,
+                    legs_t.c.shipment_id,
+                    legs_t.c.seq,
+                    legs_t.c.status,
+                    legs_t.c.planned_start,
+                    legs_t.c.planned_end,
+                    legs_t.c.origin_id,
+                    legs_t.c.dest_id,
+                    origin.c.lat.label("o_lat"),
+                    origin.c.lng.label("o_lng"),
+                    dest.c.lat.label("d_lat"),
+                    dest.c.lng.label("d_lng"),
+                ).select_from(
+                    legs_t.join(origin, legs_t.c.origin_id == origin.c.id).join(
+                        dest, legs_t.c.dest_id == dest.c.id
+                    )
+                )
             )
-            .select_from(legs_t.join(origin, legs_t.c.origin_id == origin.c.id)
-                         .join(dest, legs_t.c.dest_id == dest.c.id))
-        ).mappings().all()
+            .mappings()
+            .all()
+        )
 
         ship_status = {
             r["id"]: r["status"]
-            for r in conn.execute(select(shipments_t.c.id, shipments_t.c.status)).mappings()
+            for r in conn.execute(
+                select(shipments_t.c.id, shipments_t.c.status)
+            ).mappings()
         }
 
         fixed_legs = 0
@@ -129,19 +156,33 @@ def main() -> None:
                 else:
                     new_status, target_t = "active", p
 
-            pts = build_leg_points(
-                leg["id"], leg["o_lat"], leg["o_lng"], leg["d_lat"], leg["d_lng"],
-                leg["planned_start"], leg["planned_end"], target_t, now,
-            ) if target_t > 0 else []
+            pts = (
+                build_leg_points(
+                    leg["id"],
+                    leg["o_lat"],
+                    leg["o_lng"],
+                    leg["d_lat"],
+                    leg["d_lng"],
+                    leg["planned_start"],
+                    leg["planned_end"],
+                    target_t,
+                    now,
+                )
+                if target_t > 0
+                else []
+            )
 
             cur_cnt = conn.execute(
-                select(func.count()).select_from(points_t).where(points_t.c.leg_id == leg["id"])
+                select(func.count())
+                .select_from(points_t)
+                .where(points_t.c.leg_id == leg["id"])
             ).scalar()
 
-            need = new_status != leg["status"] or pts != cur_cnt
+            # pts 是点列表、cur_cnt 是条数，必须比长度，直接 != 会恒为真导致统计失真
+            need = new_status != leg["status"] or len(pts) != cur_cnt
             if need:
                 fixed_legs += 1
-            if pts != cur_cnt:
+            if len(pts) != cur_cnt:
                 fixed_pts += 1
             if args.apply:
                 conn.execute(delete(points_t).where(points_t.c.leg_id == leg["id"]))
@@ -149,25 +190,34 @@ def main() -> None:
                     conn.execute(points_t.insert(), pts)
                 if new_status != leg["status"]:
                     conn.execute(
-                        update(legs_t).where(legs_t.c.id == leg["id"]).values(status=new_status)
+                        update(legs_t)
+                        .where(legs_t.c.id == leg["id"])
+                        .values(status=new_status)
                     )
                 if pts:
                     conn.execute(
                         update(shipments_t)
                         .where(shipments_t.c.id == sid)
-                        .values(latest_lat=pts[-1]["lat"], latest_lng=pts[-1]["lng"],
-                                latest_ts=pts[-1]["recorded_at"])
+                        .values(
+                            latest_lat=pts[-1]["lat"],
+                            latest_lng=pts[-1]["lng"],
+                            latest_ts=pts[-1]["recorded_at"],
+                        )
                     )
 
         # 已送达却缺 actual_arrival 的是脏数据（之前才有机会出现），兜底补上
         rows = conn.execute(
-            text("SELECT COUNT(*) FROM shipments WHERE status='delivered' AND actual_arrival IS NULL")
+            text(
+                "SELECT COUNT(*) FROM shipments WHERE status='delivered' AND actual_arrival IS NULL"
+            )
         ).scalar()
         print(f"delivered 但 actual_arrival 为空: {rows}")
         if args.apply and rows:
             conn.execute(
-                text("UPDATE shipments SET actual_arrival=planned_arrival "
-                     "WHERE status='delivered' AND actual_arrival IS NULL")
+                text(
+                    "UPDATE shipments SET actual_arrival=planned_arrival "
+                    "WHERE status='delivered' AND actual_arrival IS NULL"
+                )
             )
 
     print(f"需修段数={fixed_legs}，点数不符的段={fixed_pts}")

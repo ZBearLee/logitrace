@@ -62,10 +62,10 @@ ROUTES: list[tuple[str, str, str]] = [
 
 # 各运输方式的典型航程天数与轨迹点数量
 MODE_PROFILE: dict[str, tuple[float, int]] = {
-    "sea": (28, 80),    # 航程天数, 轨迹点数
+    "sea": (28, 80),  # 航程天数, 轨迹点数
     "air": (1, 24),
     "rail": (16, 60),
-    "road": (7, 60),     # 7 天：内陆仓间长途公路段程放长，让在途能持续观察、轨迹连线可见
+    "road": (7, 60),  # 7 天：内陆仓间长途公路段程放长，让在途能持续观察、轨迹连线可见
 }
 
 # 货主：订单的归属方。订单是运单的上游，运单靠 order_id 挂到订单上
@@ -132,15 +132,23 @@ def leg_progress(start: datetime, end: datetime, now: datetime) -> float:
 
 
 def build_points(seg: Seg, leg_id: int, progress: float, now: datetime) -> list[dict]:
-    """沿大圆航线按时间均匀插值出一段的轨迹点，只生成到 progress 处。"""
+    """沿大圆航线按时间均匀插值出一段的轨迹点，只生成到 progress 处。
+
+    progress<=0（planned 段）不生成任何点，避免原点出现孤立散点；
+    0<progress<1 时额外补一个精确末点（当前真实位置），让轨迹闭到尾段而非停在网格点前。
+    """
     days = (seg.end - seg.start).total_seconds() / 86400
     heading = bearing_deg(seg.o_lat, seg.o_lng, seg.d_lat, seg.d_lng)
     points: list[dict] = []
+    if progress <= 0:
+        return points
     for k in range(seg.points):
         t = k / (seg.points - 1)
         if t > progress:
             break
-        lat, lng = interpolate_great_circle(seg.o_lat, seg.o_lng, seg.d_lat, seg.d_lng, t)
+        lat, lng = interpolate_great_circle(
+            seg.o_lat, seg.o_lng, seg.d_lat, seg.d_lng, t
+        )
         points.append(
             {
                 "leg_id": leg_id,
@@ -152,10 +160,28 @@ def build_points(seg: Seg, leg_id: int, progress: float, now: datetime) -> list[
                 "created_at": now,
             }
         )
+    # 补精确末点：当前真实位置（progress 处），闭合尾段
+    if progress < 1.0:
+        lat, lng = interpolate_great_circle(
+            seg.o_lat, seg.o_lng, seg.d_lat, seg.d_lng, progress
+        )
+        points.append(
+            {
+                "leg_id": leg_id,
+                "lat": lat,
+                "lng": lng,
+                "speed": seg.speed,
+                "heading": heading,
+                "recorded_at": seg.start + timedelta(days=days * progress),
+                "created_at": now,
+            }
+        )
     return points
 
 
-def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict[str, int]:
+def generate(
+    count: int, reset: bool = False, extra_in_transit: int = 0
+) -> dict[str, int]:
     """批量生成历史运单，返回各类数据的写入条数。
 
     reset=True 时先清空业务数据：脚本本身是追加式的，
@@ -183,11 +209,15 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
         # 港口与内陆仓分开建索引：多段联运要用 type 区分干线与短驳的起终点
         ports = {
             row.code: (row.id, row.lat, row.lng)
-            for row in conn.execute(select(locations_t).where(locations_t.c.type == "port"))
+            for row in conn.execute(
+                select(locations_t).where(locations_t.c.type == "port")
+            )
         }
         inland = {
             row.code: (row.id, row.lat, row.lng)
-            for row in conn.execute(select(locations_t).where(locations_t.c.type == "warehouse"))
+            for row in conn.execute(
+                select(locations_t).where(locations_t.c.type == "warehouse")
+            )
         }
         # 公路运单的端点是内陆仓，干线是港口，取端点时统一按 code 查
         all_locs = {**ports, **inland}
@@ -223,9 +253,13 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
             # i >= count 的额外段强制在途，用来按需追加在途演示数据。
             # 不再用「刚出发」那种只到明天、单点轨迹的凑数在途。
             if i >= count:
-                departure = now - timedelta(days=voyage_days * random.uniform(0.15, 0.8))
+                departure = now - timedelta(
+                    days=voyage_days * random.uniform(0.15, 0.8)
+                )
             elif random.random() < 0.65:
-                departure = now - timedelta(days=voyage_days * random.uniform(0.15, 0.8))
+                departure = now - timedelta(
+                    days=voyage_days * random.uniform(0.15, 0.8)
+                )
             else:
                 departure = now - timedelta(days=voyage_days * random.uniform(1.1, 5.0))
 
@@ -244,18 +278,66 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
                 seg3_start = seg2_end
                 seg3_end = seg3_start + timedelta(days=DRAYAGE_DAYS)
                 segs: list[Seg] = [
-                    Seg(1, "road", o_inland_id, origin_id, oi_lat, oi_lng, o_lat, o_lng,
-                        seg1_start, seg1_end, DRAYAGE_POINTS, road_speed),
-                    Seg(2, mode, origin_id, dest_id, o_lat, o_lng, d_lat, d_lng,
-                        seg2_start, seg2_end, point_count, avg_speed),
-                    Seg(3, "road", dest_id, d_inland_id, d_lat, d_lng, di_lat, di_lng,
-                        seg3_start, seg3_end, DRAYAGE_POINTS, road_speed),
+                    Seg(
+                        1,
+                        "road",
+                        o_inland_id,
+                        origin_id,
+                        oi_lat,
+                        oi_lng,
+                        o_lat,
+                        o_lng,
+                        seg1_start,
+                        seg1_end,
+                        DRAYAGE_POINTS,
+                        road_speed,
+                    ),
+                    Seg(
+                        2,
+                        mode,
+                        origin_id,
+                        dest_id,
+                        o_lat,
+                        o_lng,
+                        d_lat,
+                        d_lng,
+                        seg2_start,
+                        seg2_end,
+                        point_count,
+                        avg_speed,
+                    ),
+                    Seg(
+                        3,
+                        "road",
+                        dest_id,
+                        d_inland_id,
+                        d_lat,
+                        d_lng,
+                        di_lat,
+                        di_lng,
+                        seg3_start,
+                        seg3_end,
+                        DRAYAGE_POINTS,
+                        road_speed,
+                    ),
                 ]
                 arrival = seg3_end
             else:
                 segs = [
-                    Seg(1, mode, origin_id, dest_id, o_lat, o_lng, d_lat, d_lng,
-                        departure, departure + timedelta(days=voyage_days), point_count, avg_speed)
+                    Seg(
+                        1,
+                        mode,
+                        origin_id,
+                        dest_id,
+                        o_lat,
+                        o_lng,
+                        d_lat,
+                        d_lng,
+                        departure,
+                        departure + timedelta(days=voyage_days),
+                        point_count,
+                        avg_speed,
+                    )
                 ]
                 arrival = segs[0].end
 
@@ -297,7 +379,9 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
                     carrier_id=carrier_id,
                     planned_departure=departure,
                     planned_arrival=arrival,
-                    actual_departure=departure if finished or status == "in_transit" else None,
+                    actual_departure=departure
+                    if finished or status == "in_transit"
+                    else None,
                     actual_arrival=arrival if finished else None,
                     created_at=now,
                 )
@@ -308,7 +392,11 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
             all_points: list[dict] = []
             leg_ids: list[int] = []
             for seg in segs:
-                seg_status = "completed" if now >= seg.end else ("active" if now >= seg.start else "planned")
+                seg_status = (
+                    "completed"
+                    if now >= seg.end
+                    else ("active" if now >= seg.start else "planned")
+                )
                 leg_result = conn.execute(
                     insert(legs_t).values(
                         shipment_id=shipment_id,
@@ -326,7 +414,9 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
                 stats["legs"] += 1
 
                 progress = 1.0 if finished else leg_progress(seg.start, seg.end, now)
-                all_points.extend(build_points(seg, leg_id, progress, now))
+                # planned 段（progress==0）不生成轨迹点：避免原点孤立散点，也省写入
+                if progress > 0:
+                    all_points.extend(build_points(seg, leg_id, progress, now))
 
             if all_points:
                 conn.execute(insert(points_t), all_points)
@@ -408,7 +498,9 @@ def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="LogiTrace 模拟器 v1：批量生成历史运单")
+    parser = argparse.ArgumentParser(
+        description="LogiTrace 模拟器 v1：批量生成历史运单"
+    )
     parser.add_argument("--count", type=int, default=DEFAULT_COUNT, help="生成运单数量")
     parser.add_argument(
         "--reset",

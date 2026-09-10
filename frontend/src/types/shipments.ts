@@ -93,3 +93,62 @@ export interface ShipmentsQuery {
   /** 按运单号模糊匹配（前端列表搜索框）。 */
   shipment_no?: string | null
 }
+
+/** 全局事件筛选参数（通知中心）。 */
+export interface EventsQuery {
+  page?: number
+  page_size?: number
+  event_type?: string | null
+  shipment_no?: string | null
+  since?: string | null
+}
+
+/** 全局里程碑事件（通知中心列表项）。 */
+export interface EventOut {
+  id: number
+  shipment_id: number
+  leg_id: number | null
+  event_type: string
+  occurred_at: string
+  payload_json: string | null
+  shipment_no: string | null
+  shipment_status: string | null
+}
+
+/** 事件分页结果。 */
+export interface PagedEvents {
+  total: number
+  page: number
+  page_size: number
+  items: EventOut[]
+}
+
+/** 异常筛选参数（异常中心）。 */
+export interface ExceptionsQuery {
+  page?: number
+  page_size?: number
+  type?: string | null
+  level?: string | null
+  unresolved_only?: boolean
+}
+
+/** 异常记录（异常中心列表项）。 */
+export interface ExceptionOut {
+  id: number
+  shipment_id: number
+  type: string
+  level: string
+  detail: string | null
+  detected_at: string
+  resolved_at: string | null
+  shipment_no: string | null
+  shipment_status: string | null
+}
+
+/** 异常分页结果。 */
+export interface PagedExceptions {
+  total: number
+  page: number
+  page_size: number
+  items: ExceptionOut[]
+}

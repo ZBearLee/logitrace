@@ -10,6 +10,15 @@ export interface PositionStreamMessage {
   ts: string
 }
 
+/** 实时事件流消息：里程碑 / 异常，由模拟器经 Redis 频道推到后端再转发。 */
+export interface EventStreamMessage {
+  shipment_id: number
+  leg_id: number
+  event_type: string
+  occurred_at: string
+  payload_json: string | null
+}
+
 /** 后端空闲时下发的心跳，仅用于保活，不下发给业务。 */
 const PING_TYPE = 'ping'
 
@@ -84,6 +93,71 @@ export function connectPositions(onMessage: (msg: PositionStreamMessage) => void
     // StrictMode 在开发模式下会把 effect 跑两遍：首次挂载的 socket 往往还处于
     // CONNECTING 就被卸载，此时直接 close() 会让浏览器报 "closed before the
     // connection is established"。等它真正 OPEN 后再关，可避免这条开发期告警。
+    if (socket.readyState === WebSocket.CONNECTING) {
+      socket.addEventListener('open', () => socket.close(), { once: true })
+    } else {
+      socket.close()
+    }
+  }
+}
+
+export function connectEvents(onMessage: (msg: EventStreamMessage) => void): () => void {
+  const base = import.meta.env.VITE_WS_BASE as string | undefined
+  const url = base
+    ? `${base.replace(/\/$/, '')}/ws/events`
+    : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws/events`
+  let ws: WebSocket | null = null
+  let closed = false
+  let retryTimer: number | undefined
+  let watchdogTimer: number | undefined
+  let lastAliveAt = Date.now()
+
+  const clearTimer = (timer: number | undefined) => {
+    if (timer) window.clearTimeout(timer)
+  }
+
+  const watchdog = () => {
+    if (closed) return
+    if (Date.now() - lastAliveAt > STALE_TIMEOUT_MS) {
+      ws?.close()
+      return
+    }
+    watchdogTimer = window.setTimeout(watchdog, WATCHDOG_INTERVAL_MS)
+  }
+
+  const open = () => {
+    if (closed) return
+    ws = new WebSocket(url)
+    ws.onmessage = (ev) => {
+      lastAliveAt = Date.now()
+      try {
+        const data = JSON.parse(ev.data) as EventStreamMessage & { type?: string }
+        if (data.type === PING_TYPE) return
+        onMessage(data)
+      } catch {
+        // 单条脏数据不影响整体流
+      }
+    }
+    ws.onopen = () => {
+      lastAliveAt = Date.now()
+      clearTimer(watchdogTimer)
+      watchdogTimer = window.setTimeout(watchdog, WATCHDOG_INTERVAL_MS)
+    }
+    ws.onclose = () => {
+      clearTimer(watchdogTimer)
+      watchdogTimer = undefined
+      if (closed) return
+      retryTimer = window.setTimeout(open, RETRY_INTERVAL_MS)
+    }
+  }
+  open()
+
+  return () => {
+    closed = true
+    clearTimer(retryTimer)
+    clearTimer(watchdogTimer)
+    const socket = ws
+    if (!socket) return
     if (socket.readyState === WebSocket.CONNECTING) {
       socket.addEventListener('open', () => socket.close(), { once: true })
     } else {

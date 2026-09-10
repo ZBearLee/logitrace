@@ -53,9 +53,9 @@ def seed_shipments(session: Session) -> int:
     """
     # 幂等：已存在演示运单则跳过，避免重复执行不断叠加
     existing = session.scalar(
-        select(func.count()).select_from(Shipment).where(
-            Shipment.shipment_no.like(f"{_DEMO_SHIPMENT_PREFIX}%")
-        )
+        select(func.count())
+        .select_from(Shipment)
+        .where(Shipment.shipment_no.like(f"{_DEMO_SHIPMENT_PREFIX}%"))
     )
     if existing:
         return 0
@@ -118,17 +118,31 @@ def seed_shipments(session: Session) -> int:
         if multimodal:
             segs: list[tuple[int, str, Location, Location, datetime, datetime]] = [
                 (1, "road", o_inland, origin, departure, departure + timedelta(days=drayage_days)),
-                (2, mode, origin, dest, departure + timedelta(days=drayage_days),
-                 departure + timedelta(days=drayage_days + voyage_days)),
-                (3, "road", dest, d_inland, departure + timedelta(days=drayage_days + voyage_days),
-                 departure + timedelta(days=drayage_days * 2 + voyage_days)),
+                (
+                    2,
+                    mode,
+                    origin,
+                    dest,
+                    departure + timedelta(days=drayage_days),
+                    departure + timedelta(days=drayage_days + voyage_days),
+                ),
+                (
+                    3,
+                    "road",
+                    dest,
+                    d_inland,
+                    departure + timedelta(days=drayage_days + voyage_days),
+                    departure + timedelta(days=drayage_days * 2 + voyage_days),
+                ),
             ]
         else:
             segs = [(1, mode, origin, dest, departure, arrival)]
 
         leg_ids: list[int] = []
         for seq, seg_mode, seg_o, seg_d, s_start, s_end in segs:
-            leg_status = "completed" if now >= s_end else ("active" if now >= s_start else "planned")
+            leg_status = (
+                "completed" if now >= s_end else ("active" if now >= s_start else "planned")
+            )
             leg = Leg(
                 shipment_id=shipment.id,
                 seq=seq,
@@ -160,22 +174,29 @@ def seed_shipments(session: Session) -> int:
         # 里程碑：提货（短驳开始）→ 离港（干线开始）
         events: list[MilestoneEvent] = []
         if multimodal:
-            events.append(MilestoneEvent(
-                shipment_id=shipment.id, leg_id=leg_ids[0],
-                event_type="picked_up", occurred_at=departure,
-            ))
+            events.append(
+                MilestoneEvent(
+                    shipment_id=shipment.id,
+                    leg_id=leg_ids[0],
+                    event_type="picked_up",
+                    occurred_at=departure,
+                )
+            )
         main_leg_id = leg_ids[1] if multimodal else leg_ids[0]
         main_start = segs[1][4] if multimodal else segs[0][4]
-        events.append(MilestoneEvent(
-            shipment_id=shipment.id, leg_id=main_leg_id,
-            event_type="departed", occurred_at=main_start,
-        ))
+        events.append(
+            MilestoneEvent(
+                shipment_id=shipment.id,
+                leg_id=main_leg_id,
+                event_type="departed",
+                occurred_at=main_start,
+            )
+        )
         session.add_all(events)
         added += 1
 
     session.commit()
     return added
-
 
 
 def seed_locations(session: Session) -> int:

@@ -13,7 +13,10 @@ def haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     phi1, lam1, phi2, lam2 = map(math.radians, (lat1, lng1, lat2, lng2))
     dphi = phi2 - phi1
     dlam = lam2 - lam1
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    a = (
+        math.sin(dphi / 2) ** 2
+        + math.cos(phi1) * math.cos(phi2) * math.sin(dlam / 2) ** 2
+    )
     return 2 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
 
 
@@ -51,5 +54,7 @@ def bearing_deg(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     phi1, lam1, phi2, lam2 = map(math.radians, (lat1, lng1, lat2, lng2))
     dlam = lam2 - lam1
     y = math.sin(dlam) * math.cos(phi2)
-    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(dlam)
+    x = math.cos(phi1) * math.sin(phi2) - math.sin(phi1) * math.cos(phi2) * math.cos(
+        dlam
+    )
     return (math.degrees(math.atan2(y, x)) + 360) % 360

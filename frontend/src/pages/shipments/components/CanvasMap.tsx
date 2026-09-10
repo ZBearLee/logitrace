@@ -145,7 +145,9 @@ export default function CanvasMap({
     ctx.fillStyle = '#0b1f33'
     ctx.fillRect(0, 0, w, h)
     // 视野自适应要把总起/总止纳入范围，否则规划路径端点会被裁掉
-    const allForView: PositionPointOut[] = points
+    // 必须拷贝：下面 push 起/终点是为了算视野，直接改入参会污染 points 本身，
+    // 让 drawTrack 把这俩伪点当成实时点（id<0）多画两个绿圈，且数组会逐帧增长。
+    const allForView: PositionPointOut[] = [...points]
     if (originLat != null && originLng != null) {
       allForView.push({
         id: -1,

@@ -135,3 +135,53 @@ class UserClaims(BaseModel):
 
     username: str
     role: str
+
+
+class EventOut(BaseModel):
+    """全局里程碑事件（通知中心的数据源）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    shipment_id: int
+    leg_id: int | None = None
+    event_type: str
+    occurred_at: datetime
+    payload_json: str | None = None
+    # 联表带出，前端直接展示，不必再查 shipments
+    shipment_no: str | None = None
+    shipment_status: str | None = None
+
+
+class PagedEvents(BaseModel):
+    """事件分页结果。"""
+
+    total: int
+    page: int
+    page_size: int
+    items: list[EventOut]
+
+
+class ExceptionOut(BaseModel):
+    """异常记录（异常中心的数据源）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    shipment_id: int
+    type: str
+    level: str
+    detail: str | None = None
+    detected_at: datetime
+    resolved_at: datetime | None = None
+    shipment_no: str | None = None
+    shipment_status: str | None = None
+
+
+class PagedExceptions(BaseModel):
+    """异常分页结果。"""
+
+    total: int
+    page: int
+    page_size: int
+    items: list[ExceptionOut]

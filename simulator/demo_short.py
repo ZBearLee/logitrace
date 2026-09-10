@@ -17,8 +17,8 @@ from main import CUSTOMERS, Seg, build_points, leg_progress
 # 演示路线：起终点 code、运输方式、行程分钟数。
 # 选横跨距离大的组合，缩短行程后位移在全球视野下才明显。
 DEMOS: list[tuple[str, str, str, int]] = [
-    ("WUSNYC", "WUSLAX", "road", 10),   # 纽约 -> 洛杉矶，10 分钟走完
-    ("WDEHAM", "WNLRTM", "road", 30),   # 汉堡 -> 鹿特丹，30 分钟走完
+    ("WUSNYC", "WUSLAX", "road", 10),  # 纽约 -> 洛杉矶，10 分钟走完
+    ("WDEHAM", "WNLRTM", "road", 30),  # 汉堡 -> 鹿特丹，30 分钟走完
 ]
 
 POINTS = 60
@@ -39,12 +39,12 @@ def make_demo(apply: bool) -> None:
     points_t = Table("position_points", metadata, autoload_with=engine)
 
     now = _utcnow()
-    print(f"基准时间 {now.isoformat()}Z，{'写库模式' if apply else '预演模式（加 --apply 才写）'}")
+    print(
+        f"基准时间 {now.isoformat()}Z，{'写库模式' if apply else '预演模式（加 --apply 才写）'}"
+    )
 
     with engine.begin() as conn:
-        locs = {
-            r.code: (r.id, r.lat, r.lng) for r in conn.execute(select(locations_t))
-        }
+        locs = {r.code: (r.id, r.lat, r.lng) for r in conn.execute(select(locations_t))}
         carrier_row = conn.execute(
             select(carriers_t).where(carriers_t.c.mode == "road")
         ).first()
@@ -107,20 +107,37 @@ def make_demo(apply: bool) -> None:
                 )
                 lid = res.inserted_primary_key[0]
 
-                seg = Seg(1, mode, o_id, d_id, o_lat, o_lng, d_lat, d_lng,
-                          start, end, POINTS, road_speed)
+                seg = Seg(
+                    1,
+                    mode,
+                    o_id,
+                    d_id,
+                    o_lat,
+                    o_lng,
+                    d_lat,
+                    d_lng,
+                    start,
+                    end,
+                    POINTS,
+                    road_speed,
+                )
                 pts = build_points(seg, lid, leg_progress(start, end, now), now)
                 if pts:
                     conn.execute(insert(points_t), pts)
                     conn.execute(
                         update(shipments_t)
                         .where(shipments_t.c.id == sid)
-                        .values(latest_lat=pts[-1]["lat"], latest_lng=pts[-1]["lng"],
-                                latest_ts=pts[-1]["recorded_at"])
+                        .values(
+                            latest_lat=pts[-1]["lat"],
+                            latest_lng=pts[-1]["lng"],
+                            latest_ts=pts[-1]["recorded_at"],
+                        )
                     )
 
-            print(f"  {shipment_no}: {o_code} -> {d_code}，行程 {minutes} 分钟"
-                  f"（{start.strftime('%H:%M:%S')} -> {end.strftime('%H:%M:%S')}）")
+            print(
+                f"  {shipment_no}: {o_code} -> {d_code}，行程 {minutes} 分钟"
+                f"（{start.strftime('%H:%M:%S')} -> {end.strftime('%H:%M:%S')}）"
+            )
 
 
 if __name__ == "__main__":

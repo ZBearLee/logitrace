@@ -7,11 +7,18 @@ import RequireAuth from '@/components/RequireAuth'
 import { dashboardRoutes } from '@/router/modules/dashboard'
 import { shipmentsRoutes } from '@/router/modules/shipments'
 import { exceptionsRoutes } from '@/router/modules/exceptions'
+import { notificationsRoutes } from '@/router/modules/notifications'
 
 /** 路由聚合：各模块路由在 modules/ 内声明，这里统一收口 */
-export const routes: AppRoute[] = [...dashboardRoutes, ...shipmentsRoutes, ...exceptionsRoutes]
+export const routes: AppRoute[] = [
+  ...dashboardRoutes,
+  ...shipmentsRoutes,
+  ...exceptionsRoutes,
+  ...notificationsRoutes,
+]
 
-export const DEFAULT_ROUTE = '/dashboard'
+// 默认落地到运单列表：大屏页目前是空壳（地图/地球可视化还没接），拿它当首屏会看到一片空白。
+export const DEFAULT_ROUTE = '/shipments'
 
 /**
  * 按 pathname 匹配路由，支持动态段（如 /shipments/:id 匹配 /shipments/12）。
