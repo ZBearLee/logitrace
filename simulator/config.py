@@ -21,18 +21,19 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str = ""
 
-    # 实时流节奏：每 tick_seconds 真实秒，推进 advance_minutes 仿真分钟。
-    # advance_minutes=1 即 1 倍速：每真实秒推进 1 仿真分钟，移动最贴近真实节奏，
-    # 但几天物流要很久才动完；需要快速演示时临时调大（如 2~10），值越大推进越快。
+    # 实时流节奏：1:1 真实时间推进——仿真时钟恒等于 utcnow()，不存在虚拟加速。
+    # 过去用"每 tick 推进 N 仿真分钟"做倍速，进程连跑几天后时钟会甩过所有在途段的
+    # planned_end，把运输中运单瞬间判成已送达，运输中状态根本留不住。
+    # 现在时钟就是真实时间，这里只保留轮询间隔。
     tick_seconds: float = 1.0
-    advance_minutes: int = 1
 
     # 滞留检测 v1：窗口内速度持续低于 stall_speed(km/h) 判为滞留
     stall_speed: float = 2.0
     stall_window: int = 20
 
-    # 周期性把当前点落库，让历史轨迹随时间增长（避免每 tick 写库）
-    persist_minutes: int = 60
+    # 周期性把当前点落库，让历史轨迹随时间增长（避免每 tick 写库）。
+    # 单位是真实秒：默认每 60 真实秒落一个点到 position_points。
+    persist_seconds: float = 60
 
     @property
     def mysql_dsn_sync(self) -> str:

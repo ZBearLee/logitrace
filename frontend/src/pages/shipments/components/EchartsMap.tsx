@@ -78,7 +78,8 @@ export default function EchartsMap({
     // 轨迹点按 leg 分组（displayPositions 已按 leg.seq 排好顺序）；规划基线沿大圆
     // 航线插值，二者都跨 180° 经线拆段，避免跨太平洋航线被画成横贯地图的直线。
     const grouped = groupPointsByLeg(points)
-    const planSegments = buildPlanSegments(legs)
+    // 已完成段整条都是"已走过"，不再画规划虚线，只保留实线历史轨迹。
+    const planSegments = buildPlanSegments(legs?.filter((l) => l.status !== 'completed'))
 
     // 按轨迹范围算 geo center/zoom：实时推进时点范围几乎不变，所以 zoom/center 不会跳；
     // 切到不同区域时重新 fit。

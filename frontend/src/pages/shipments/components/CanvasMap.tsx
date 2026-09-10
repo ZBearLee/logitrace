@@ -174,7 +174,8 @@ export default function CanvasMap({
 
     // 规划路径基线（淡色虚线）：每段 origin → dest 沿大圆插值，已走过部分由
     // drawTrack 中的鲜艳色轨迹覆盖，形成"一条线、走过 vs 未走过分色"。
-    const planSegments = buildPlanSegments(legs)
+    // 已完成段整条已走过，不再画规划虚线，只保留实线历史轨迹。
+    const planSegments = buildPlanSegments(legs?.filter((l) => l.status !== 'completed'))
     if (planSegments.length) {
       ctx.save()
       ctx.setLineDash([6, 4])

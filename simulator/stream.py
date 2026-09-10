@@ -126,21 +126,25 @@ def run() -> None:
 
     r = redis.Redis.from_url(settings.redis_url)
 
-    # 仿真时钟：从真实现在开始累加，保证与 v1 造数据时同一套进度基准
+    # 仿真时钟恒等于真实时间（1:1 推进），不再做任何倍速累加。
+    # 过去每 tick 无条件 += advance_minutes，进程连续跑几天后仿真时钟会甩过所有在途段的
+    # planned_end，把"运输中"运单瞬间判成已完成并改成已送达，运输中状态根本留不住。
+    # 现在段是否完成只由真实时间与 planned_end 的先后决定，推进天然随时间线性增长。
     sim_now = _utcnow()
     prev_pos: dict[int, tuple[float, float]] = {}   # leg_id -> 上一 tick 位置，用于算速度
     stalled_legs: set[int] = set()                   # 已判定滞留的 leg，避免重复插异常
     completed: dict[int, set[int]] = {}              # shipment_id -> 已完成 leg 集合
-    persist_acc: dict[int, int] = {}                 # leg_id -> 已累计未落库的仿真分钟数
+    persist_acc: dict[int, float] = {}               # leg_id -> 已累计未落库的真实秒数
     ship_legs: dict[int, set[int]] = {}              # shipment_id -> 该运单所有段（判全完成）
 
     print(
-        f"[stream] 启动，仿真起点 {sim_now.isoformat()}Z，"
-        f"每 {settings.tick_seconds}s 推进 {settings.advance_minutes} 仿真分钟"
+        f"[stream] 启动，1:1 真实时间驱动（仿真时钟 = utcnow），"
+        f"轮询间隔 {settings.tick_seconds}s，每 {settings.persist_seconds}s 落一个轨迹点"
     )
     try:
         while True:
-            sim_now += timedelta(minutes=settings.advance_minutes)
+            # 每 tick 重新对齐真实时间，避免累加导致仿真时钟无限超前（见 run() 顶部说明）
+            sim_now = _utcnow()
             ts_iso = sim_now.isoformat()
 
             legs = _load_active_legs(engine, metadata)
@@ -162,7 +166,9 @@ def run() -> None:
                         _publish_event(r, sid, lid, "departed", ts_iso, None)
 
                     if progress >= 1.0:
-                        # 段完成：标记完成 + 发里程碑；最后一个段完成触发 delivered
+                        # 段完成：标记完成 + 发里程碑；最后一个段完成触发 delivered。
+                        # 关键点：把该段轨迹整条补齐到终点（而非只补 1 个点）。否则历史轨迹点
+                        # 只覆盖到被标完成前的那一处，已送达运单的实线会在起点/中途就断掉。
                         completed.setdefault(sid, set()).add(lid)
                         db_ops.append(
                             update(legs_t).where(legs_t.c.id == lid).values(status="completed")
@@ -176,6 +182,40 @@ def run() -> None:
                                 .where(shipments_t.c.id == sid)
                                 .values(status="delivered")
                             )
+                        # 删除该段已有（可能只到半途）的点，再写入完整大圆轨迹 0→1，
+                        # 保证已送达后实线从起点连到终点。
+                        db_ops.append(points_t.delete().where(points_t.c.leg_id == lid))
+                        days = (leg["planned_end"] - leg["planned_start"]).total_seconds() / 86400
+                        n = max(16, min(80, int(days * 3) + 16))
+                        heading = bearing_deg(
+                            leg["o_lat"], leg["o_lng"], leg["d_lat"], leg["d_lng"]
+                        )
+                        for k in range(n + 1):
+                            t = k / n
+                            plat, plng = interpolate_great_circle(
+                                leg["o_lat"], leg["o_lng"], leg["d_lat"], leg["d_lng"], t
+                            )
+                            db_ops.append(
+                                insert(points_t).values(
+                                    leg_id=lid,
+                                    lat=plat,
+                                    lng=plng,
+                                    speed=0,
+                                    heading=heading,
+                                    recorded_at=leg["planned_start"]
+                                    + timedelta(days=days * t),
+                                    created_at=_utcnow(),
+                                )
+                            )
+                        db_ops.append(
+                            update(shipments_t)
+                            .where(shipments_t.c.id == sid)
+                            .values(
+                                latest_lat=leg["d_lat"],
+                                latest_lng=leg["d_lng"],
+                                latest_ts=leg["planned_end"],
+                            )
+                        )
                         continue
 
                     if progress <= 0.0:
@@ -190,7 +230,10 @@ def run() -> None:
                     speed: Optional[float] = None
                     if lid in prev_pos:
                         d_km = haversine_km(prev_pos[lid][0], prev_pos[lid][1], lat, lng)
-                        speed = d_km / (settings.advance_minutes / 60.0)
+                        # 1:1 真实推进：一个 tick 的真实间隔是 tick_seconds 秒，
+                        # 按真实耗时折算才得到 km/h；若沿用旧的"仿真分钟"口径会把速度
+                        # 算小约 60 倍，导致正常行驶也被误判成滞留。
+                        speed = d_km / (settings.tick_seconds / 3600.0)
                     prev_pos[lid] = (lat, lng)
 
                     pos_msg = json.dumps({
@@ -216,8 +259,8 @@ def run() -> None:
                     _check_stall(r, db_ops, events_t, lid, sid, speed, ts_iso, stalled_legs)
 
                     # 周期性落库，让历史轨迹随时间增长（V1.0 的历史查询才有活数据）
-                    persist_acc[lid] = persist_acc.get(lid, 0) + settings.advance_minutes
-                    if persist_acc[lid] >= settings.persist_minutes and speed is not None:
+                    persist_acc[lid] = persist_acc.get(lid, 0) + settings.tick_seconds
+                    if persist_acc[lid] >= settings.persist_seconds and speed is not None:
                         persist_acc[lid] = 0
                         db_ops.append(
                             insert(points_t).values(
