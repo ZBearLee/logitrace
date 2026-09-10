@@ -185,3 +185,44 @@ class PagedExceptions(BaseModel):
     page: int
     page_size: int
     items: list[ExceptionOut]
+
+
+class MapPort(BaseModel):
+    """大屏地图：地点标注（港口/仓库/城市统一）。"""
+
+    code: str
+    name: str
+    lat: float
+    lng: float
+
+
+class MapLeg(BaseModel):
+    """大屏地图：航线段，起止经纬度已 join 带出，前端直接画大圆弧。"""
+
+    seq: int
+    mode: str
+    origin_code: str | None = None
+    dest_code: str | None = None
+    origin_lat: float | None = None
+    origin_lng: float | None = None
+    dest_lat: float | None = None
+    dest_lng: float | None = None
+    status: str
+
+
+class MapRoute(BaseModel):
+    """大屏地图：运单航线，聚合各段供前端按运单着色与点击交互。"""
+
+    shipment_id: int
+    shipment_no: str
+    status: str
+    latest_lat: float | None = None
+    latest_lng: float | None = None
+    legs: list[MapLeg] = []
+
+
+class MapOverview(BaseModel):
+    """大屏地图聚合数据：地点 + 航线，一次请求拿全。"""
+
+    ports: list[MapPort] = []
+    routes: list[MapRoute] = []

@@ -7,6 +7,7 @@ from app.api.routes import (
     events,
     exceptions,
     health,
+    map as map_routes,
     orders,
     realtime,
     shipments,
@@ -26,3 +27,4 @@ app.include_router(orders.router)
 app.include_router(realtime.router)
 app.include_router(events.router)
 app.include_router(exceptions.router)
+app.include_router(map_routes.router)

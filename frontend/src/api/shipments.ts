@@ -12,6 +12,7 @@ import type {
   PagedExceptions,
   EventsQuery,
   ExceptionsQuery,
+  MapOverview,
 } from '@/types/shipments'
 
 /** 运单列表：分页 + 按状态筛选。 */
@@ -62,4 +63,9 @@ export function getExceptions(q: ExceptionsQuery = {}) {
   if (q.unresolved_only) params.set('unresolved_only', 'true')
   const qs = params.toString()
   return request<PagedExceptions>(`/exceptions${qs ? `?${qs}` : ''}`)
+}
+
+/** 大屏地图聚合数据：港口 + 航线，一次请求拿全（避免按运单逐条请求）。 */
+export function getMapOverview() {
+  return request<MapOverview>('/map/overview')
 }

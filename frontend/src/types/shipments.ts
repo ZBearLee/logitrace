@@ -152,3 +152,40 @@ export interface PagedExceptions {
   page_size: number
   items: ExceptionOut[]
 }
+
+/** 大屏地图：地点标注（港口/仓库/城市统一）。 */
+export interface MapPort {
+  code: string
+  name: string
+  lat: number
+  lng: number
+}
+
+/** 大屏地图：航线段，起止经纬度已由后端 join 带出。 */
+export interface MapLeg {
+  seq: number
+  mode: string
+  origin_code: string | null
+  dest_code: string | null
+  origin_lat: number | null
+  origin_lng: number | null
+  dest_lat: number | null
+  dest_lng: number | null
+  status: string
+}
+
+/** 大屏地图：运单航线，聚合各段供按运单着色与点击交互。 */
+export interface MapRoute {
+  shipment_id: number
+  shipment_no: string
+  status: string
+  latest_lat: number | null
+  latest_lng: number | null
+  legs: MapLeg[]
+}
+
+/** 大屏地图聚合数据：地点 + 航线，一次请求拿全。 */
+export interface MapOverview {
+  ports: MapPort[]
+  routes: MapRoute[]
+}
