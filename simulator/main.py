@@ -155,7 +155,7 @@ def build_points(seg: Seg, leg_id: int, progress: float, now: datetime) -> list[
     return points
 
 
-def generate(count: int, reset: bool = False) -> dict[str, int]:
+def generate(count: int, reset: bool = False, extra_in_transit: int = 0) -> dict[str, int]:
     """批量生成历史运单，返回各类数据的写入条数。
 
     reset=True 时先清空业务数据：脚本本身是追加式的，
@@ -199,11 +199,12 @@ def generate(count: int, reset: bool = False) -> dict[str, int]:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # 订单数少于运单数（拆单时多票共用一张），所以订单序号单独累加，不复用运单下标
-        # order_pool 每项为 [order_id, 已挂运单数]，用于挑还能挂票的订单
-        order_seq = 0
+        # order_pool 每项为 [order_id, 已挂运单数]，用于挑还能挂票的订单。
+        # 追加模式（非 reset）从大序号起步，避开首次生成的订单号，避免 order_no 唯一键冲突
+        order_seq = 0 if reset else 100000
         order_pool: list[list[int]] = []
 
-        for i in range(count):
+        for i in range(count + extra_in_transit):
             origin_code, dest_code, mode = random.choice(ROUTES)
             if origin_code not in all_locs or dest_code not in all_locs:
                 continue
@@ -217,10 +218,13 @@ def generate(count: int, reset: bool = False) -> dict[str, int]:
             road_speed = carriers_by_mode.get("road", [(0, 55.0)])[0][1]
 
             # 运输中数据要「行程过半、段程长、到货还在未来」才好看且能观察：
-            # 65% 概率造在途运单（出发在过去 voyage_days 的 15%~80% 处，进度中段、
-            # 轨迹连线明显、到货仍在未来数天~数十天），其余造已送达的历史运单。
+            # 基础 count 里 65% 概率造在途运单（出发在过去 voyage_days 的 15%~80% 处，
+            # 进度中段、轨迹连线明显、到货仍在未来数天~数十天），其余造已送达历史运单。
+            # i >= count 的额外段强制在途，用来按需追加在途演示数据。
             # 不再用「刚出发」那种只到明天、单点轨迹的凑数在途。
-            if random.random() < 0.65:
+            if i >= count:
+                departure = now - timedelta(days=voyage_days * random.uniform(0.15, 0.8))
+            elif random.random() < 0.65:
                 departure = now - timedelta(days=voyage_days * random.uniform(0.15, 0.8))
             else:
                 departure = now - timedelta(days=voyage_days * random.uniform(1.1, 5.0))
@@ -411,9 +415,15 @@ def main() -> None:
         action="store_true",
         help="先清空业务数据（events/points/legs/shipments/orders）再生成，重跑时用",
     )
+    parser.add_argument(
+        "--extra-in-transit",
+        type=int,
+        default=0,
+        help="额外强制生成的在途运单数量（演示用，如 20）",
+    )
     args = parser.parse_args()
 
-    stats = generate(args.count, args.reset)
+    stats = generate(args.count, args.reset, args.extra_in_transit)
     print("生成完成：")
     for key, value in stats.items():
         print(f"  {key}: {value}")

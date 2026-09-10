@@ -18,6 +18,12 @@ class LegOut(BaseModel):
     # 起止港口 code：查询时 join locations 带出，前端链路视图可直接展示
     origin_code: str | None = None
     dest_code: str | None = None
+    # 起止港口经纬度：join locations 带出。前端地图按段画"规划路径"基线
+    # （淡色实线）+ 已走过轨迹（鲜艳实线），单线连续无重叠。
+    origin_lat: float | None = None
+    origin_lng: float | None = None
+    dest_lat: float | None = None
+    dest_lng: float | None = None
     planned_start: datetime | None = None
     planned_end: datetime | None = None
     status: str
@@ -51,6 +57,13 @@ class ShipmentDetail(ShipmentBrief):
     order_no: str | None = None
     customer_name: str | None = None
     legs: list[LegOut] = []
+    # 总起 / 总止地点经纬度：第一段 origin 与最后一段 dest 的经纬度。
+    # 前端地图用这些画"完整规划路径"虚线，覆盖还没走到的那段，
+    # 否则只看到已走过的轨迹，缺失整条路线的全貌。
+    origin_lat: float | None = None
+    origin_lng: float | None = None
+    dest_lat: float | None = None
+    dest_lng: float | None = None
 
 
 class MilestoneEventOut(BaseModel):

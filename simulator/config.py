@@ -21,9 +21,11 @@ class Settings(BaseSettings):
     redis_db: int = 0
     redis_password: str = ""
 
-    # 实时流节奏：每 tick_seconds 真实秒，推进 advance_minutes 仿真分钟
+    # 实时流节奏：每 tick_seconds 真实秒，推进 advance_minutes 仿真分钟。
+    # advance_minutes=1 即 1 倍速：每真实秒推进 1 仿真分钟，移动最贴近真实节奏，
+    # 但几天物流要很久才动完；需要快速演示时临时调大（如 2~10），值越大推进越快。
     tick_seconds: float = 1.0
-    advance_minutes: int = 10
+    advance_minutes: int = 1
 
     # 滞留检测 v1：窗口内速度持续低于 stall_speed(km/h) 判为滞留
     stall_speed: float = 2.0

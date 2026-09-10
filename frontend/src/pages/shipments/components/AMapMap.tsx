@@ -6,7 +6,8 @@
 // dev / prod 建议用两个 key，dev key 不设或宽松白名单，prod key 绑死线上域名。
 import { useEffect, useRef, useState } from 'react'
 import { Alert } from 'antd'
-import type { PositionPointOut } from '@/types/shipments'
+import type { LegOut, PositionPointOut } from '@/types/shipments'
+import { buildPlanSegments, groupPointsByLeg, buildTrackSegments } from '@/utils/track'
 
 const KEY = (import.meta.env as any).VITE_AMAP_KEY as string | undefined
 const SECURITY = (import.meta.env as any).VITE_AMAP_SECURITY as string | undefined
@@ -36,53 +37,154 @@ export default function AMapMap({
   points,
   originCode,
   destCode,
+  originLat,
+  originLng,
+  destLat,
+  destLng,
+  legs,
 }: {
   points: PositionPointOut[]
   originCode?: string | null
   destCode?: string | null
+  originLat?: number | null
+  originLng?: number | null
+  destLat?: number | null
+  destLng?: number | null
+  legs?: LegOut[]
 }) {
   const ref = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const pointsRef = useRef(points)
   pointsRef.current = points
-  const overlayRef = useRef<{ polyline: any; start: any; current: any } | null>(null)
+  const overlayRef = useRef<{
+    polylines: any[]
+    planPolylines: any[]
+    start: any
+    end: any
+    current: any | null
+  } | null>(null)
   const fittedRef = useRef(false)
   const fitTimerRef = useRef<number | undefined>(undefined)
+  // 首屏自适应完成（瓦片加载好）后置位：仅当它已为 true 时切运单才立即重 fit，
+  // 避免首屏瓦片未就绪时的无效 setFitView 抢在 complete 兜底之前。
+  const mapReadyRef = useRef(false)
+  // 已自适应过的运单标识（首点 leg_id）：变化时说明切了运单，需重新 fit 视野。
+  const fitKeyRef = useRef<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const drawAll = () => {
     const map = mapRef.current
     const AMap = (window as any).AMap
     if (!map || !AMap) return
-    const path = pointsRef.current.map((p) => [p.lng, p.lat])
-    if (!path.length) return
-    const start = path[0]
-    const last = path[path.length - 1]
+    if (!pointsRef.current.length) return
 
-    // 覆盖物复用：实时点推进时只更新数据，不 clearMap 重建。
-    // 否则每秒都要重建折线与标记并重算视野，地图会持续闪烁且卡顿。
-    if (overlayRef.current) {
-      overlayRef.current.polyline.setPath(path)
-      overlayRef.current.start.setPosition(start)
-      overlayRef.current.current.setPosition(last)
-    } else {
-      // 折线用项目主色蓝：原来的浅黄 #ffd666 与高德浅色底图对比度太低，几乎看不清
-      const polyline = new AMap.Polyline({ path, strokeColor: '#1677ff', strokeWeight: 5 })
-      // Marker 通过构造时传 map 直接挂到地图上，AMap v2.0 的 map.add 不支持 Marker
-      const startMarker = new AMap.Marker({
-        position: start,
+    // 切运单检测：首点 leg_id 随运单变化，而实时推送每秒更新 points 时首点不变，
+    // 因此用它作标识不会在实时推进中误触发。切单后重置一次性自适应标志并立即重 fit。
+    const fitKey = pointsRef.current[0]?.leg_id ?? -1
+    if (fitKey !== fitKeyRef.current) {
+      fitKeyRef.current = fitKey
+      fittedRef.current = false
+      if (mapReadyRef.current) {
+        map.setFitView()
+        fittedRef.current = true
+      }
+    }
+
+    // 按 leg_id 分组，防止多式联运时跨段连线导致乱麻；分组顺序即段顺序。
+    const grouped = groupPointsByLeg(pointsRef.current)
+
+    // 起点 / 终点 marker 直接用后端总起 / 总止经纬度（origin_lat/lng、dest_lat/lng），
+    // 与规划路径虚线两端对齐；不再基于 points[0] / lastLeg 推算。
+    const lastLeg = grouped[grouped.length - 1]
+    const livePoint =
+      lastLeg && lastLeg.length > 0 && lastLeg[lastLeg.length - 1].id < 0
+        ? lastLeg[lastLeg.length - 1]
+        : null
+
+    // 每段独立 polyline：把实时点也纳入路径，让线连续到当前位置不断开；
+    // 实时点本身用下方独立 marker 显示。跨 180° 经线处由 buildTrackSegments 拆段。
+    const polylinesData = buildTrackSegments(pointsRef.current)
+
+    // 复用：leg 数量未变则 setPath/setPosition，否则 clearMap 重建
+    if (overlayRef.current && overlayRef.current.polylines.length === polylinesData.length) {
+      overlayRef.current.polylines.forEach((pl, i) => pl.setPath(polylinesData[i]))
+      // 起点 / 终点用后端总起 / 总止经纬度（与规划路径虚线两端对齐）
+      if (originLat != null && originLng != null) {
+        overlayRef.current.start.setPosition([originLng, originLat])
+      }
+      if (destLat != null && destLng != null && overlayRef.current.end) {
+        overlayRef.current.end.setPosition([destLng, destLat])
+      }
+      if (livePoint) {
+        if (!overlayRef.current.current) {
+          overlayRef.current.current = new AMap.Marker({
+            position: [livePoint.lng, livePoint.lat],
+            map,
+            title: '当前位置',
+          })
+        } else {
+          overlayRef.current.current.setPosition([livePoint.lng, livePoint.lat])
+        }
+      }
+      return
+    }
+
+    map.clearMap()
+    // 规划路径基线（淡色虚线）：每段 origin → dest 沿大圆插值，已走过部分由
+    // 下方 polylines 覆盖，形成"走过 vs 未走过"分色效果。
+    const planSegments = buildPlanSegments(legs)
+    const planPolylines = planSegments.map(
+      (path) =>
+        new AMap.Polyline({
+          path,
+          strokeColor: '#9aa4ad',
+          strokeWeight: 2,
+          strokeOpacity: 0.6,
+          strokeStyle: 'dashed',
+          map,
+        }),
+    )
+    const polylines = polylinesData.map(
+      (path) =>
+        new AMap.Polyline({
+          path,
+          strokeColor: '#1677ff',
+          strokeWeight: 5,
+          map,
+        }),
+    )
+    // 起点 marker 用总起点经纬度（后端 origin_lat/lng），始终创建
+    const startMarker =
+      originLat != null && originLng != null
+        ? new AMap.Marker({
+            position: [originLng, originLat],
+            map,
+            title: originCode ? `起 ${originCode}` : '起点',
+          })
+        : null
+    // 终点 marker 用总终点经纬度（后端 dest_lat/lng），始终创建——这是真实目的地坐标
+    const endMarker =
+      destLat != null && destLng != null
+        ? new AMap.Marker({
+            position: [destLng, destLat],
+            map,
+            title: destCode ? `终 ${destCode}` : '终点',
+          })
+        : null
+    let currentMarker: any = null
+    if (livePoint) {
+      currentMarker = new AMap.Marker({
+        position: [livePoint.lng, livePoint.lat],
         map,
-        title: originCode ? `起 ${originCode}` : '起点',
+        title: '当前位置',
       })
-      // 末端是「最新已知位置」，接实时流后即当前位置，并非目的地：
-      // 轨迹只画到当前进度，目的地坐标并未参与绘制，标成终点会误导。
-      const currentMarker = new AMap.Marker({
-        position: last,
-        map,
-        title: destCode ? `当前位置 · 目的地 ${destCode}` : '当前位置',
-      })
-      map.add(polyline)
-      overlayRef.current = { polyline, start: startMarker, current: currentMarker }
+    }
+    overlayRef.current = {
+      polylines,
+      planPolylines,
+      start: startMarker,
+      end: endMarker,
+      current: currentMarker,
     }
   }
 
@@ -102,6 +204,7 @@ export default function AMapMap({
           if (fittedRef.current) return
           map.setFitView()
           fittedRef.current = true
+          mapReadyRef.current = true
         }
         map.on('complete', fitOnce)
         fitTimerRef.current = window.setTimeout(fitOnce, 1000)
@@ -122,7 +225,7 @@ export default function AMapMap({
   useEffect(() => {
     drawAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, originCode, destCode])
+  }, [points, originCode, destCode, originLat, originLng, destLat, destLng, legs])
 
   if (!KEY) {
     return (

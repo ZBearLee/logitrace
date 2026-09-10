@@ -16,6 +16,7 @@ export function getShipments(q: ShipmentsQuery = {}) {
   if (q.page) params.set('page', String(q.page))
   if (q.page_size) params.set('page_size', String(q.page_size))
   if (q.status) params.set('status', q.status)
+  if (q.shipment_no) params.set('shipment_no', q.shipment_no)
   const qs = params.toString()
   return request<PagedShipments>(`/shipments${qs ? `?${qs}` : ''}`)
 }

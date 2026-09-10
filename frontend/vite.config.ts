@@ -18,6 +18,12 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      // WebSocket 实时位置流：前端连 /ws/positions，dev server 转发到后端
+      '/ws': {
+        target: 'ws://127.0.0.1:8000',
+        changeOrigin: true,
+        ws: true,
+      },
       // 高德 JS API：前端只写 /amap/xxx，由 dev server 转发到高德，避免暴露 key 来源与跨域
       '/amap': {
         target: 'https://webapi.amap.com',

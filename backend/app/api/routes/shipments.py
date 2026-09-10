@@ -36,11 +36,15 @@ async def list_shipments(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     status: str | None = Query(None, description="planned / in_transit / delivered / delayed"),
+    shipment_no: str | None = Query(None, description="按运单号模糊匹配（部分即可）"),
 ) -> PagedShipments:
-    """运单列表：分页 + 按状态筛选，带出港口 code 和承运商名。"""
+    """运单列表：分页 + 按状态/运单号筛选，带出港口 code 和承运商名。"""
     conditions = []
     if status:
         conditions.append(Shipment.status == status)
+    if shipment_no:
+        # 模糊匹配，用户输入部分运单号即可定位（运单号含固定前缀，前缀检索仍有意义）
+        conditions.append(Shipment.shipment_no.ilike(f"%{shipment_no}%"))
 
     total = await session.scalar(select(func.count()).select_from(Shipment).where(*conditions))
 
@@ -98,13 +102,33 @@ async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
     # 段也要 join locations 拿港口 code，否则前端链路只能显示地点 id
     leg_rows = (
         await session.execute(
-            select(Leg, LegOrigin.code, LegDest.code)
+            select(
+                Leg,
+                LegOrigin.code,
+                LegDest.code,
+                LegOrigin.lat,
+                LegOrigin.lng,
+                LegDest.lat,
+                LegDest.lng,
+            )
             .outerjoin(LegOrigin, Leg.origin_id == LegOrigin.id)
             .outerjoin(LegDest, Leg.dest_id == LegDest.id)
             .where(Leg.shipment_id == shipment_id)
             .order_by(Leg.seq)
         )
     ).all()
+
+    # 总起 / 总止经纬度：第一段 origin 与最后一段 dest 的 lat/lng，
+    # 用于前端地图画"完整规划路径"虚线（已走过的轨迹只到实时点为止，
+    # 没有这些就看不到剩下还要走的路）。
+    origin_lat = origin_lng = dest_lat = dest_lng = None
+    if leg_rows:
+        # leg_rows 已 join 出每段 origin/dest 的 lat/lng（参见上面的 select），
+        # 直接取第一段 origin 与最后一段 dest，避免再单独查 Location。
+        _, _, _, o_lat, o_lng, _, _ = leg_rows[0]
+        _, _, _, _, _, d_lat, d_lng = leg_rows[-1]
+        origin_lat, origin_lng = o_lat, o_lng
+        dest_lat, dest_lng = d_lat, d_lng
 
     return ShipmentDetail(
         id=s.id,
@@ -123,6 +147,10 @@ async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
         order_id=s.order_id,
         order_no=order_no,
         customer_name=customer_name,
+        origin_lat=origin_lat,
+        origin_lng=origin_lng,
+        dest_lat=dest_lat,
+        dest_lng=dest_lng,
         legs=[
             LegOut(
                 id=leg.id,
@@ -132,11 +160,15 @@ async def get_shipment(shipment_id: int, session: SessionDep) -> ShipmentDetail:
                 dest_id=leg.dest_id,
                 origin_code=leg_origin_code,
                 dest_code=leg_dest_code,
+                origin_lat=leg_origin_lat,
+                origin_lng=leg_origin_lng,
+                dest_lat=leg_dest_lat,
+                dest_lng=leg_dest_lng,
                 planned_start=leg.planned_start,
                 planned_end=leg.planned_end,
                 status=leg.status,
             )
-            for leg, leg_origin_code, leg_dest_code in leg_rows
+            for leg, leg_origin_code, leg_dest_code, leg_origin_lat, leg_origin_lng, leg_dest_lat, leg_dest_lng in leg_rows
         ],
     )
 

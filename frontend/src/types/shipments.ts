@@ -31,6 +31,11 @@ export interface LegOut {
   dest_id: number | null
   origin_code: string | null
   dest_code: string | null
+  /** 起止港口经纬度：后端 join 带出，前端按段画规划路径基线。 */
+  origin_lat: number | null
+  origin_lng: number | null
+  dest_lat: number | null
+  dest_lng: number | null
   planned_start: string | null
   planned_end: string | null
   status: string
@@ -44,6 +49,12 @@ export interface ShipmentDetail extends ShipmentBrief {
   /** 货主：同属订单信息，从 orders 带出 */
   customer_name: string | null
   legs: LegOut[]
+  /** 总起经纬度（第一段 origin），用于画完整规划路径虚线。 */
+  origin_lat: number | null
+  origin_lng: number | null
+  /** 总止经纬度（最后一段 dest），用于画完整规划路径虚线。 */
+  dest_lat: number | null
+  dest_lng: number | null
 }
 
 /** 里程碑事件（时间轴用）。 */
@@ -79,4 +90,6 @@ export interface ShipmentsQuery {
   page?: number
   page_size?: number
   status?: string | null
+  /** 按运单号模糊匹配（前端列表搜索框）。 */
+  shipment_no?: string | null
 }

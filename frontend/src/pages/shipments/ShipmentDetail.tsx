@@ -97,6 +97,21 @@ export default function ShipmentDetail() {
     return out
   }, [positions, detail, liveByLeg])
 
+  // 三个地图组件（ECharts/Canvas/高德）接收的路线 props 完全一致，先收集成
+  // 一个对象再展开，避免每处调用重复写一长串 origin/dest/legs。
+  const mapViewProps = detail
+    ? {
+        points: displayPositions,
+        originCode: detail.origin_code,
+        destCode: detail.dest_code,
+        originLat: detail.origin_lat,
+        originLng: detail.origin_lng,
+        destLat: detail.dest_lat,
+        destLng: detail.dest_lng,
+        legs: detail.legs,
+      }
+    : null
+
   // 外层 Content 不滚动（避免双滚动条），滚动交给页面自身
   return (
     <div style={{ height: '100%', overflowY: 'auto', padding: 24, boxSizing: 'border-box' }}>
@@ -214,7 +229,7 @@ export default function ShipmentDetail() {
               <Typography.Text type="secondary">暂无轨迹点</Typography.Text>
             )}
 
-            {positionsError == null && positions && positions.length > 0 && (
+            {positionsError == null && positions && positions.length > 0 && mapViewProps && (
               <Tabs
                 defaultActiveKey="echarts"
                 // 只挂载当前页签，避免三个地图同时初始化（高德会去加载 JS API）
@@ -223,35 +238,17 @@ export default function ShipmentDetail() {
                   {
                     key: 'echarts',
                     label: 'ECharts 地理图',
-                    children: (
-                      <EchartsMap
-                        points={displayPositions}
-                        originCode={detail.origin_code}
-                        destCode={detail.dest_code}
-                      />
-                    ),
+                    children: <EchartsMap key={shipmentId} {...mapViewProps} />,
                   },
                   {
                     key: 'canvas',
                     label: 'Canvas 世界地图',
-                    children: (
-                      <CanvasMap
-                        points={displayPositions}
-                        originCode={detail.origin_code}
-                        destCode={detail.dest_code}
-                      />
-                    ),
+                    children: <CanvasMap {...mapViewProps} />,
                   },
                   {
                     key: 'amap',
                     label: '高德真实地图',
-                    children: (
-                      <AMapMap
-                        points={displayPositions}
-                        originCode={detail.origin_code}
-                        destCode={detail.dest_code}
-                      />
-                    ),
+                    children: <AMapMap {...mapViewProps} />,
                   },
                 ]}
               />
