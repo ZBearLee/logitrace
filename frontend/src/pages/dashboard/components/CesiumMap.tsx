@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useWorldGeo } from '@/pages/shipments/components/worldGeo'
+import { connectPositions } from '@/api/ws'
 import type { MapOverview } from '@/types/shipments'
 
 /** 初始视角：东经 105 / 北纬 20 上空 2400 万米，一屏俯瞰全球主要航线。 */
@@ -23,6 +24,9 @@ const PORT_COLOR = '#8ab4dd'
  */
 const ROUTE_HEIGHT = 50_000
 const PORT_HEIGHT = 5_000
+// 实际轨迹比计划航线高出一截：避免两条线在同一高度 z-fight，
+// 让「已走过」的实线始终压在虚线上面，而不是被虚线盖住。
+const TRAIL_HEIGHT = ROUTE_HEIGHT + 1_000
 
 /** 运单状态 → 航线与当前位置点的颜色。 */
 const ROUTE_COLOR: Record<string, string> = {
@@ -32,10 +36,23 @@ const ROUTE_COLOR: Record<string, string> = {
   delayed: '#f0a020',
 }
 
-/** 实体 id 前缀：点击拾取时按前缀区分航线/当前位置/港口。 */
+/** 实体 id 前缀：点击拾取时按前缀区分航线/尾迹/当前位置/港口。 */
 const ID_ROUTE = 'route:'
+const ID_TRAIL = 'trail:'
 const ID_POS = 'pos:'
 const ID_PORT = 'port:'
+
+/**
+ * 已走过/已送达画实线（亮青），未经过画虚线（暗），和运单详情保持一致。
+ * 实际轨迹从段原点开始，避免后端只返回最近点时看起来从中间冒出来。
+ */
+const ACTUAL_COLOR = '#3fd0c9'
+
+/** 单条尾迹保留的点数上限：超出丢头部，避免长时间挂着让数组无限增长。 */
+const TRAIL_MAX_POINTS = 240
+
+/** 与上一点距离小于该值（米）的位置点丢弃：模拟器高频上报，过滤零位移抖动。 */
+const MIN_TRAIL_STEP = 10
 
 type Ring = number[][]
 type Rings = Ring[]
@@ -61,6 +78,24 @@ function ringToPositions(ring: Ring): Cesium.Cartesian3[] {
   return Cesium.Cartesian3.fromDegreesArray(pts.flat())
 }
 
+/** 把一段尾迹画到 ds：实体按需创建，positions 必须传新数组才会被认定变更。 */
+function upsertTrail(ds: Cesium.CustomDataSource, legId: number, pts: Cesium.Cartesian3[]) {
+  if (pts.length < 2) return
+  let trail = ds.entities.getById(`${ID_TRAIL}${legId}`)
+  if (trail == null) {
+    trail = ds.entities.add({
+      id: `${ID_TRAIL}${legId}`,
+      polyline: {
+        width: 3,
+        material: Cesium.Color.fromCssColorString(ACTUAL_COLOR).withAlpha(0.95),
+        positions: [],
+      },
+    })
+  }
+  const line = trail.polyline
+  if (line != null) line.positions = new Cesium.ConstantProperty(pts.slice())
+}
+
 export default function CesiumMap({ data }: { data: MapOverview | null }) {
   const navigate = useNavigate()
   const containerRef = useRef<HTMLDivElement>(null)
@@ -74,6 +109,17 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
   useEffect(() => {
     dataRef.current = data
   }, [data])
+
+  // 实时尾迹：leg_id → 走过的点。放 ref 而不是 state——位置消息每秒数十条，
+  // 走 state 会让整棵组件树跟着重渲染。
+  const trailsRef = useRef<Map<number, Cesium.Cartesian3[]>>(new Map())
+  // 位置流只上报 leg_id，需要映射回运单才能更新对应船位
+  const legToShipmentRef = useRef<Map<number, number>>(new Map())
+  // 实时尾迹需要从段原点开始画（已走过 = 实线），位置流里只有当前点，用 ref 记住每段原点
+  const legOriginRef = useRef<Map<number, Cesium.Cartesian3>>(new Map())
+  // 最近一次收到位置的时间：只进 ref，心跳组件自己每秒读一次并刷新，
+  // 避免 parent 因每秒计时器整棵重渲染。
+  const lastPosAtRef = useRef<number | null>(null)
 
   const [card, setCard] = useState<InfoCard | null>(null)
   // 默认只盯在途与延误（控制塔真正要看的），可切回全部运单看全球航线网
@@ -122,6 +168,9 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     viewer.camera.changed.addEventListener(onCameraChanged)
     // 无影像时的地表底色
     viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString(GLOBE_COLOR)
+    // 关掉地表大气散射：默认开启时远看整球被照成亮蓝、拉近又回归深底色，
+    // 球面颜色随视角漂移；控制塔风格要的是任何缩放级别下都是稳定的深蓝
+    viewer.scene.globe.showGroundAtmosphere = false
 
     // 国界必须同步构建实体，不能走 GeoJsonDataSource.load 异步加载：
     // 那个 promise 在 StrictMode/热更的「挂载→销毁→再挂载」循环里会和 viewer
@@ -180,8 +229,14 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
       }
       const snapshot = dataRef.current
       if (!snapshot) return
-      if (raw.startsWith(ID_ROUTE) || raw.startsWith(ID_POS)) {
-        const shipmentId = Number(raw.split(':')[1])
+      // 尾迹也归到运单：trail id 存的是 leg_id，要经映射换回 shipment_id
+      const shipmentId = raw.startsWith(ID_TRAIL)
+        ? legToShipmentRef.current.get(Number(raw.split(':')[1]))
+        : Number(raw.split(':')[1])
+      if (
+        (raw.startsWith(ID_ROUTE) || raw.startsWith(ID_POS) || raw.startsWith(ID_TRAIL)) &&
+        shipmentId != null
+      ) {
         const route = snapshot.routes.find((r) => r.shipment_id === shipmentId)
         if (route) {
           setCard({
@@ -229,34 +284,86 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         ? data.routes
         : data.routes.filter((r) => r.status === 'in_transit' || r.status === 'delayed')
 
-    // 航线：每段一条弧线，颜色随运单状态；polyline 默认 arcType 即 GEODESIC，
-    // 两点自动沿大圆弧插值，天然就是「大圆航线」
+    // 位置流只给 leg_id，先把映射建好（覆盖全部运单，切换筛选不用重建）。
+    // 尾迹数据本身留在 ref 里：重拉 overview 不该清空已经走过的轨迹。
+    const legToShipment = new Map<number, number>()
+    for (const route of data.routes) {
+      for (const leg of route.legs) legToShipment.set(leg.leg_id, route.shipment_id)
+    }
+    legToShipmentRef.current = legToShipment
+
+    // 航线：每段按「已走过 / 未经过 / 已完成」分样式，和运单详情保持一致：
+    // - 已送达/已完成段：全实线
+    // - 活动中段：已走过（实际轨迹）实线，未经过虚线
+    // - 计划中/跳过段：全虚线
     for (const route of routes) {
       const color = Cesium.Color.fromCssColorString(ROUTE_COLOR[route.status] ?? '#6e7681')
+      const isDelivered = route.status === 'delivered'
+
       for (const leg of route.legs) {
         const oLat = leg.origin_lat
         const oLng = leg.origin_lng
         const dLat = leg.dest_lat
         const dLng = leg.dest_lng
         if (oLat == null || oLng == null || dLat == null || dLng == null) continue
-        ds.entities.add({
-          // id 必须带段序号：一条运单有多段，重复 id 会让 EntityCollection 直接抛 DeveloperError
-          id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
-          polyline: {
-            // 两端同高 → 大圆插值全线同高：悬浮在陆地块上方，不再被遮挡
-            positions: Cesium.Cartesian3.fromDegreesArrayHeights([
-              oLng,
-              oLat,
-              ROUTE_HEIGHT,
-              dLng,
-              dLat,
-              ROUTE_HEIGHT,
-            ]),
-            width: 1.5,
-            material: color.withAlpha(0.7),
-          },
-        })
+
+        const origin = Cesium.Cartesian3.fromDegrees(oLng, oLat, ROUTE_HEIGHT)
+        const dest = Cesium.Cartesian3.fromDegrees(dLng, dLat, ROUTE_HEIGHT)
+        // 记住每段原点：实时位置流只给当前点，尾迹需要从原点开始画。
+        // 尾迹用 TRAIL_HEIGHT，比计划航线高一点，避免 z-fight 被虚线盖住。
+        legOriginRef.current.set(leg.leg_id, Cesium.Cartesian3.fromDegrees(oLng, oLat, TRAIL_HEIGHT))
+
+        const isCompletedLeg = leg.status === 'completed'
+        const isActiveLeg = leg.status === 'active'
+
+        if (isDelivered || isCompletedLeg) {
+          // 已送达/已完成：全实线
+          ds.entities.add({
+            id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
+            polyline: {
+              positions: [origin, dest],
+              width: 2,
+              material: color.withAlpha(0.95),
+            },
+          })
+        } else if (isActiveLeg) {
+          // 活动中：未经过部分从当前位置画虚线到终点
+          const track = leg.track
+          const current =
+            track.length > 0
+              ? track[track.length - 1]
+              : [route.latest_lng, route.latest_lat]
+          const [curLng, curLat] = current
+          if (curLng != null && curLat != null) {
+            const currentPos = Cesium.Cartesian3.fromDegrees(curLng, curLat, ROUTE_HEIGHT)
+            ds.entities.add({
+              id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
+              polyline: {
+                positions: [currentPos, dest],
+                width: 2,
+                material: new Cesium.PolylineDashMaterialProperty({
+                  color: color.withAlpha(0.65),
+                  dashLength: 16,
+                }),
+              },
+            })
+          }
+        } else {
+          // 计划中 / 跳过：全虚线
+          ds.entities.add({
+            id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
+            polyline: {
+              positions: [origin, dest],
+              width: 2,
+              material: new Cesium.PolylineDashMaterialProperty({
+                color: color.withAlpha(0.65),
+                dashLength: 16,
+              }),
+            },
+          })
+        }
       }
+
       // 船位亮点只给在途/延误画：已送达运单的 latest 停在终点，画出来会被误认成船位
       if (
         (route.status === 'in_transit' || route.status === 'delayed') &&
@@ -273,6 +380,21 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
             outlineColor: Cesium.Color.WHITE.withAlpha(0.6),
           },
         })
+        // 尾迹：后端带的活动段历史轨迹点垫底，打开就有看得见的「实际轨迹」。
+        // 只从连上那刻开始累积的话，船每秒才走十几米，几分钟内画不出可见长度
+        for (const leg of route.legs) {
+          if (!trailsRef.current.has(leg.leg_id) && leg.track.length > 0) {
+            // 后端为了性能只返回最近 360 个点，这里把原点补到头部，
+            // 让「已走过」的实线从起点开始，而不是从中间某处冒出来。
+            const originPt = legOriginRef.current.get(leg.leg_id)
+            const trackPts = leg.track.map(([lng, lat]) =>
+              Cesium.Cartesian3.fromDegrees(lng, lat, TRAIL_HEIGHT),
+            )
+            trailsRef.current.set(leg.leg_id, originPt ? [originPt, ...trackPts] : trackPts)
+          }
+          const existing = trailsRef.current.get(leg.leg_id)
+          if (existing != null) upsertTrail(ds, leg.leg_id, existing)
+        }
       }
     }
 
@@ -293,6 +415,63 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
       })
     }
   }, [data, viewMode])
+
+  /**
+   * 实时轨迹层：订阅位置流 → 累积尾迹 + 移动船位点。
+   * 全程只操作 Cesium 实体、不进 React 状态：位置消息每秒数十条，
+   * 走 state 会让整棵组件树按消息频率重渲染，地球必然卡死。
+   */
+  useEffect(() => {
+    // 一帧内到达的多条消息合并成一次几何重建：逐条改实体会在高频推送下反复重建线几何
+    const dirtyLegs = new Set<number>()
+    let raf = 0
+
+    const flush = () => {
+      raf = 0
+      const ds = routeDsRef.current
+      if (ds == null) return
+      for (const legId of dirtyLegs) {
+        const pts = trailsRef.current.get(legId)
+        if (pts != null) upsertTrail(ds, legId, pts)
+      }
+      dirtyLegs.clear()
+    }
+
+    const stop = connectPositions((msg) => {
+      const shipmentId = legToShipmentRef.current.get(msg.leg_id)
+      if (shipmentId == null) return
+      const point = Cesium.Cartesian3.fromDegrees(msg.lng, msg.lat, TRAIL_HEIGHT)
+
+      let pts = trailsRef.current.get(msg.leg_id)
+      if (pts == null) {
+        // 位置流里没有历史点，但尾迹必须从原点开始，否则「已走过」的实线会从中间断开
+        const originPt = legOriginRef.current.get(msg.leg_id)
+        pts = originPt ? [originPt] : []
+        trailsRef.current.set(msg.leg_id, pts)
+      }
+      const last = pts[pts.length - 1]
+      // 与上一个点几乎重合就丢掉：过滤高频上报的零位移抖动，否则尾迹点数暴涨
+      if (last != null && Cesium.Cartesian3.distance(last, point) < MIN_TRAIL_STEP) return
+      pts.push(point)
+      if (pts.length > TRAIL_MAX_POINTS) pts.shift()
+
+      const ds = routeDsRef.current
+      if (ds != null) {
+        const ship = ds.entities.getById(`${ID_POS}${shipmentId}`)
+        if (ship != null) ship.position = new Cesium.ConstantPositionProperty(point)
+      }
+
+      // 只更新 ref：心跳组件内部有 1s 定时器，会自己读到最新时间
+      lastPosAtRef.current = Date.now()
+      dirtyLegs.add(msg.leg_id)
+      if (raf === 0) raf = requestAnimationFrame(flush)
+    })
+
+    return () => {
+      if (raf !== 0) cancelAnimationFrame(raf)
+      stop()
+    }
+  }, [])
 
   /** 回到初始全球视角：拖动/缩放迷失方向后一键复位。 */
   const resetView = () => {
@@ -335,6 +514,28 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         >
           复位视角
         </button>
+        <Heartbeat lastPosAtRef={lastPosAtRef} />
+      </div>
+      {/* 图例：与运单详情保持一致——已走过/已送达实线，未经过虚线 */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 58,
+          left: 16,
+          display: 'flex',
+          gap: 14,
+          fontSize: 11,
+          color: '#9fb4cc',
+        }}
+      >
+        <span>
+          <LegendLine color="#8aa4c0" dashed />
+          未经过
+        </span>
+        <span>
+          <LegendLine color={ACTUAL_COLOR} />
+          已走过 / 已送达
+        </span>
       </div>
       {/* 点击拾取到的信息卡：固定在右上角，不遮挡球面主体 */}
       {card != null && (
@@ -385,5 +586,54 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         </div>
       )}
     </div>
+  )
+}
+
+/** 图例里的小线段示意：虚线对应计划航段、实线对应实际轨迹。 */
+function LegendLine({ color, dashed }: { color: string; dashed?: boolean }) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 18,
+        height: 0,
+        marginRight: 5,
+        verticalAlign: 'middle',
+        borderTop: `2px ${dashed ? 'dashed' : 'solid'} ${color}`,
+      }}
+    />
+  )
+}
+
+/**
+ * 位置流心跳：绿点 = 正在实时推送（5s 内有消息）；黄点 + 时长 = 推送疑似中断；
+ * 灰色 = 一次都没收到（链路没通）。配合图例回答「这屏数据是不是活的」。
+ */
+function Heartbeat({ lastPosAtRef }: { lastPosAtRef: MutableRefObject<number | null> }) {
+  const [, tick] = useState(0)
+  useEffect(() => {
+    const id = window.setInterval(() => tick((n) => n + 1), 1000)
+    return () => window.clearInterval(id)
+  }, [])
+  const last = lastPosAtRef.current
+  const ageSec = last == null ? null : Math.floor((Date.now() - last) / 1000)
+  const live = ageSec != null && ageSec <= 5
+  const color = ageSec == null ? '#8aa4c0' : live ? '#2ea043' : '#f0a020'
+  const text = ageSec == null ? '等待位置推送' : live ? '实时' : `${ageSec}s 未更新`
+  return (
+    <span style={{ alignSelf: 'center', fontSize: 12, color }}>
+      <span
+        style={{
+          display: 'inline-block',
+          width: 6,
+          height: 6,
+          borderRadius: '50%',
+          background: color,
+          marginRight: 5,
+          verticalAlign: 'middle',
+        }}
+      />
+      {text}
+    </span>
   )
 }

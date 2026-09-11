@@ -201,6 +201,8 @@ class MapLeg(BaseModel):
 
     seq: int
     mode: str
+    # 实时位置流按 leg_id 上报，前端靠它把位置增量映射回运单与段
+    leg_id: int
     origin_code: str | None = None
     dest_code: str | None = None
     origin_lat: float | None = None
@@ -208,6 +210,9 @@ class MapLeg(BaseModel):
     dest_lat: float | None = None
     dest_lng: float | None = None
     status: str
+    # 活动段最近轨迹点（[lng, lat] 升序）：大屏「实际轨迹」用历史垫底才可见，
+    # 否则实时尾迹从连上那刻才开始累积，慢速船几分钟内画不出可见长度
+    track: list[list[float]] = []
 
 
 class MapRoute(BaseModel):

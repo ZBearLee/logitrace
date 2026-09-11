@@ -39,6 +39,7 @@ function CopyCell({ value }: { value: string }) {
       onClick={(e) => e.stopPropagation()}
     >
       <Typography.Text
+        title={value}
         style={{
           flex: '1 1 auto',
           minWidth: 0,
@@ -70,7 +71,7 @@ const columns: TableColumnsType<ShipmentBrief> = [
     dataIndex: 'shipment_no',
     key: 'shipment_no',
     align: 'center',
-    width: 200,
+    width: 260,
     // 复制按钮点击不冒泡到整行，避免误触发详情导航
     render: (v: string) => <CopyCell value={v} />,
   },
@@ -146,6 +147,10 @@ export default function Shipments() {
     },
   )
 
+  // 搜索框的本地输入态：受控显示用户输入，避免受控值不更新导致打不进字；
+  // 真正的查询条件提交到 filters 时才发起请求（见下方 onSearch）。
+  const [keyword, setKeyword] = useState(filters.shipment_no)
+
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
       <Space>
@@ -155,20 +160,25 @@ export default function Shipments() {
           style={{ width: 160 }}
           options={STATUS_OPTIONS}
           value={filters.status ?? undefined}
-          onChange={(v) => setFilters({ status: v ?? null, shipment_no: filters.shipment_no })}
+          onChange={(v) => setFilters({ status: v ?? null, shipment_no: keyword })}
         />
         <Input.Search
           allowClear
           placeholder="按运单号搜索"
           style={{ width: 260 }}
-          value={filters.shipment_no}
-          // 清除时立即重置；回车 / 点搜索按钮才发起查询，避免每次按键都请求
+          // 输入受本地 keyword 控制：打字即时回显；只有回车 / 点搜索按钮才提交到
+          // filters 触发查询，避免每次按键都请求。清除（值为空）时立即提交空条件重置列表。
+          value={keyword}
           onChange={(e) => {
+            setKeyword(e.target.value)
             if (e.target.value === '') {
               setFilters({ status: filters.status, shipment_no: '' })
             }
           }}
-          onSearch={(v) => setFilters({ status: filters.status, shipment_no: v.trim() })}
+          onSearch={(v) => {
+            setKeyword(v.trim())
+            setFilters({ status: filters.status, shipment_no: v.trim() })
+          }}
         />
       </Space>
 

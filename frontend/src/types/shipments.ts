@@ -165,6 +165,8 @@ export interface MapPort {
 export interface MapLeg {
   seq: number
   mode: string
+  /** 实时位置流按 leg_id 上报，靠它把位置增量映射回运单与段 */
+  leg_id: number
   origin_code: string | null
   dest_code: string | null
   origin_lat: number | null
@@ -172,6 +174,8 @@ export interface MapLeg {
   dest_lat: number | null
   dest_lng: number | null
   status: string
+  /** 活动段最近轨迹点（[lng, lat] 升序）：「实际轨迹」的历史垫底 */
+  track: [number, number][]
 }
 
 /** 大屏地图：运单航线，聚合各段供按运单着色与点击交互。 */
