@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 
 from app.api.routes import (
+    analytics,
     auth,
     events,
     exceptions,
@@ -30,3 +31,4 @@ app.include_router(realtime.router)
 app.include_router(events.router)
 app.include_router(exceptions.router)
 app.include_router(map_routes.router)
+app.include_router(analytics.router)

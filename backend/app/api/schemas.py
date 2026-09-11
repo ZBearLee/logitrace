@@ -241,3 +241,38 @@ class MapStats(BaseModel):
     total: int = 0
     by_status: dict[str, int] = {}
     today_events: int = 0
+
+
+class DelayBucket(BaseModel):
+    """延误分布直方图的一个桶：延误时长区间标签 + 落入该区间的运单数。"""
+
+    label: str
+    count: int
+
+
+class CarrierMetric(BaseModel):
+    """单个承运商的准点表现：仅在 rated（已送达且计划/实际到达齐全）样本上统计。"""
+
+    carrier_id: int | None = None
+    name: str
+    mode: str
+    total: int = 0
+    on_time: int = 0
+    delayed: int = 0
+    on_time_rate: float = 0
+    avg_delay_hours: float = 0
+
+
+class AnalyticsSummary(BaseModel):
+    """运营看板聚合：整体准点率 + 延误分布直方图 + 各承运商对比，一次返回给 D3 看板。
+
+    评分口径统一在后端算：只统计已送达（delivered/delayed）且有计划与实际到达的运单，
+    actual_arrival <= planned_arrival 记准时，否则按超出小时数落入延误分箱，前端只画图不重算。
+    """
+
+    total_rated: int = 0
+    on_time: int = 0
+    delayed: int = 0
+    on_time_rate: float = 0
+    delay_buckets: list[DelayBucket] = []
+    carriers: list[CarrierMetric] = []

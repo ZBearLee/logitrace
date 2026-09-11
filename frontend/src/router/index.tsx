@@ -8,6 +8,7 @@ import { dashboardRoutes } from '@/router/modules/dashboard'
 import { shipmentsRoutes } from '@/router/modules/shipments'
 import { exceptionsRoutes } from '@/router/modules/exceptions'
 import { notificationsRoutes } from '@/router/modules/notifications'
+import { analyticsRoutes } from '@/router/modules/analytics'
 
 /** 路由聚合：各模块路由在 modules/ 内声明，这里统一收口 */
 export const routes: AppRoute[] = [
@@ -15,6 +16,7 @@ export const routes: AppRoute[] = [
   ...shipmentsRoutes,
   ...exceptionsRoutes,
   ...notificationsRoutes,
+  ...analyticsRoutes,
 ]
 
 // 默认落地到大屏总览（带 KPI 概览卡片的控制塔主视图）。
