@@ -90,8 +90,17 @@ export interface ShipmentsQuery {
   page?: number
   page_size?: number
   status?: string | null
+  /** 按承运商筛选（分析页点击承运商下钻时传入）。 */
+  carrier_id?: number | null
   /** 按运单号模糊匹配（前端列表搜索框）。 */
   shipment_no?: string | null
+}
+
+/** 承运商下拉项（GET /shipments/carriers）。 */
+export interface CarrierOption {
+  id: number
+  name: string
+  mode: string
 }
 
 /** 全局事件筛选参数（通知中心）。 */

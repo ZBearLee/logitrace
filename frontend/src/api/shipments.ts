@@ -13,17 +13,24 @@ import type {
   ExceptionsQuery,
   MapOverview,
   MapStats,
+  CarrierOption,
 } from '@/types/shipments'
 
-/** 运单列表：分页 + 按状态筛选。 */
+/** 运单列表：分页 + 按状态/承运商/运单号筛选。 */
 export function getShipments(q: ShipmentsQuery = {}) {
   const params = new URLSearchParams()
   if (q.page) params.set('page', String(q.page))
   if (q.page_size) params.set('page_size', String(q.page_size))
   if (q.status) params.set('status', q.status)
+  if (q.carrier_id != null) params.set('carrier_id', String(q.carrier_id))
   if (q.shipment_no) params.set('shipment_no', q.shipment_no)
   const qs = params.toString()
   return request<PagedShipments>(`/shipments${qs ? `?${qs}` : ''}`)
+}
+
+/** 承运商下拉项：分析页下钻筛选运单时渲染 Select。 */
+export function getCarriers() {
+  return request<CarrierOption[]>('/shipments/carriers')
 }
 
 /** 运单详情（含运输段）。 */

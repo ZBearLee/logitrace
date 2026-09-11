@@ -1,6 +1,7 @@
 import { Checkbox, Select, Space, Table, Tag, Typography } from 'antd'
 import type { TableProps } from 'antd'
-import { useNavigate } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { getExceptions } from '@/api/shipments'
 import type { ExceptionOut } from '@/types/shipments'
 import { usePagedResource } from '@/hooks/usePagedResource'
@@ -24,8 +25,11 @@ const fmt = (s: string | null) => (s ? s.replace('T', ' ').slice(0, 16) : '—')
 
 export default function Exceptions() {
   const navigate = useNavigate()
+  // 下钻入口：分析页延误原因图会带 type 跳转到这里
+  const [searchParams] = useSearchParams()
 
   // 与运单列表一致的列表取数封装：分页/筛选/空值兜底统一收敛，页面零样板。
+  const initType = searchParams.get('type')
   const {
     items,
     total,
@@ -49,8 +53,15 @@ export default function Exceptions() {
         level: p.level ?? undefined,
         unresolved_only: p.unresolved_only,
       }),
-    { type: null, level: null, unresolved_only: false },
+    { type: initType, level: null, unresolved_only: false },
   )
+
+  // URL 变化（外部下钻跳转）时同步类型筛选；本地操作不写 URL，故不会触发循环
+  useEffect(() => {
+    const t = searchParams.get('type')
+    setFilters({ type: t, level: filters.level, unresolved_only: filters.unresolved_only })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   const columns: TableProps<ExceptionOut>['columns'] = [
     {

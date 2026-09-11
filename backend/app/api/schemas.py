@@ -102,6 +102,14 @@ class PagedShipments(BaseModel):
     items: list[ShipmentBrief]
 
 
+class CarrierOption(BaseModel):
+    """承运商下拉项：下钻筛选用，前端据此渲染承运商 Select。"""
+
+    id: int
+    name: str
+    mode: str
+
+
 class OrderOut(BaseModel):
     """订单。"""
 
@@ -263,11 +271,29 @@ class CarrierMetric(BaseModel):
     avg_delay_hours: float = 0
 
 
+class TrendPoint(BaseModel):
+    """趋势序列的一天：按计划到达日期聚合的准点表现，供折线图看改善/恶化。"""
+
+    date: str  # YYYY-MM-DD
+    total: int = 0
+    on_time: int = 0
+    delayed: int = 0
+    on_time_rate: float = 0
+
+
+class DelayReason(BaseModel):
+    """延误原因聚合：按异常类型统计命中次数，回答"为什么延误"。"""
+
+    type: str  # delay / stalled / route_deviation
+    count: int = 0
+
+
 class AnalyticsSummary(BaseModel):
-    """运营看板聚合：整体准点率 + 延误分布直方图 + 各承运商对比，一次返回给 D3 看板。
+    """运营看板聚合：整体准点率 + 延误分布直方图 + 各承运商对比 + 趋势 + 延误原因。
 
     评分口径统一在后端算：只统计已送达（delivered/delayed）且有计划与实际到达的运单，
     actual_arrival <= planned_arrival 记准时，否则按超出小时数落入延误分箱，前端只画图不重算。
+    trend 按计划到达日期分天；delay_reasons 来自异常记录表，按类型聚合。
     """
 
     total_rated: int = 0
@@ -276,6 +302,9 @@ class AnalyticsSummary(BaseModel):
     on_time_rate: float = 0
     delay_buckets: list[DelayBucket] = []
     carriers: list[CarrierMetric] = []
+    # 时间维度：趋势折线（按天）与延误原因拆解，让看板从「静态快照」变成可下钻的分析
+    trend: list[TrendPoint] = []
+    delay_reasons: list[DelayReason] = []
 
 
 class NetworkNode(BaseModel):
@@ -283,6 +312,8 @@ class NetworkNode(BaseModel):
 
     id 带前缀（loc-/car-）避免两类主键都从 1 开始而撞 id。
     volume 是该节点关联的运单总数，用于决定节点大小。
+    洞察字段（on_time_rate / risk / 合作方）让前端点开节点就能看到「这个口岸/承运商到底怎么样」，
+    而不是只有一张关系示意图。
     """
 
     id: str
@@ -292,6 +323,12 @@ class NetworkNode(BaseModel):
     location_type: str | None = None  # location 才有：port/warehouse/city
     country: str | None = None
     carrier_mode: str | None = None  # carrier 才有：sea/road/air/rail
+    # 洞察字段
+    on_time_rate: float | None = None  # 该节点关联运单的准点率（0-1），无评分样本时为 None
+    risk: str | None = None  # 'single_carrier'（口岸只被 1 个承运商服务）/ 'single_port'（承运商只服务 1 个口岸）
+    served_by: int | None = None  # location：服务它的不同承运商数
+    serves: int | None = None  # carrier：它服务的不同口岸数
+    partners: list[str] = []  # 主要合作方名称（口岸=承运商名 / 承运商=口岸名），按运量降序取前 5
 
 
 class NetworkEdge(BaseModel):

@@ -1,45 +1,43 @@
-// 延误分布直方图：手写 D3（d3-scale 的 band/linear + d3-axis），按延误时长分箱显示运单数。
-// 纯 SVG，柱子带数值标签；x 轴区间标签在底部居中。
+// 延误原因条形图：手写 D3 竖向柱状。按异常类型（delay/stalled/route_deviation）统计命中次数，
+// 点击柱体下钻到异常中心（按类型筛选）。纯 SVG，不引图表库。
 import { useEffect, useRef } from 'react'
 import { select } from 'd3-selection'
 import { scaleBand, scaleLinear } from 'd3-scale'
 import { max } from 'd3-array'
 import { axisBottom, axisLeft } from 'd3-axis'
-import type { DelayBucket } from '@/types/analytics'
+import type { DelayReason } from '@/types/analytics'
 
 interface Props {
-  buckets: DelayBucket[]
-  /** 点击某延误区间下钻到运单列表（准时/提前→已送达，其余→延误）。 */
-  onSelectBucket?: (label: string) => void
+  reasons: DelayReason[]
+  onSelect?: (type: string) => void
   width?: number
   height?: number
 }
 
-const BAR_COLOR = '#f0a020'
+const TYPE_LABEL: Record<string, string> = {
+  delay: '延误',
+  stalled: '滞留',
+  route_deviation: '偏航',
+}
+const TYPE_COLOR: Record<string, string> = {
+  delay: '#f0a020',
+  stalled: '#cf1322',
+  route_deviation: '#722ed1',
+}
 const AXIS_COLOR = '#5b6b7d'
 
-export default function DelayHistogram({
-  buckets,
-  onSelectBucket,
-  width = 360,
-  height = 260,
-}: Props) {
+export default function DelayReasons({ reasons, onSelect, width = 460, height = 260 }: Props) {
   const ref = useRef<SVGSVGElement | null>(null)
-  // 回调只用于绑定点击事件，放进 ref 避免父组件重渲染时整张 SVG 重建
-  const onSelectBucketRef = useRef(onSelectBucket)
-  useEffect(() => {
-    onSelectBucketRef.current = onSelectBucket
-  }, [onSelectBucket])
 
   useEffect(() => {
     const svg = select(ref.current)
     svg.selectAll('*').remove()
 
-    const margin = { top: 16, right: 12, bottom: 36, left: 36 }
+    const margin = { top: 16, right: 12, bottom: 30, left: 36 }
     const innerW = width - margin.left - margin.right
     const innerH = height - margin.top - margin.bottom
 
-    if (buckets.length === 0 || buckets.every((b) => b.count === 0)) {
+    if (reasons.length === 0 || reasons.every((r) => r.count === 0)) {
       svg
         .append('text')
         .attr('x', width / 2)
@@ -47,40 +45,40 @@ export default function DelayHistogram({
         .attr('text-anchor', 'middle')
         .attr('fill', AXIS_COLOR)
         .attr('font-size', 13)
-        .text('暂无延误数据')
+        .text('暂无异常记录')
       return
     }
 
     const x = scaleBand<string>()
-      .domain(buckets.map((b) => b.label))
+      .domain(reasons.map((r) => r.type))
       .range([0, innerW])
-      .padding(0.25)
+      .padding(0.35)
     const y = scaleLinear()
-      .domain([0, max(buckets, (b) => b.count) ?? 1])
+      .domain([0, max(reasons, (r) => r.count) ?? 1])
       .nice()
       .range([innerH, 0])
 
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
     g.selectAll('rect')
-      .data(buckets)
+      .data(reasons)
       .join('rect')
-      .attr('x', (d) => x(d.label) ?? 0)
+      .attr('x', (d) => x(d.type) ?? 0)
       .attr('y', (d) => y(d.count))
       .attr('width', x.bandwidth())
       .attr('height', (d) => innerH - y(d.count))
-      .attr('fill', BAR_COLOR)
+      .attr('fill', (d) => TYPE_COLOR[d.type] ?? '#888')
       .attr('rx', 3)
-      .style('cursor', onSelectBucketRef.current ? 'pointer' : 'default')
-      .on('click', (_e, d) => onSelectBucketRef.current?.(d.label))
+      .style('cursor', onSelect ? 'pointer' : 'default')
+      .on('click', (_e, d) => onSelect?.(d.type))
       .append('title')
-      .text((d) => `${d.label}：${d.count} 票（点击查看运单）`)
+      .text((d) => `${TYPE_LABEL[d.type] ?? d.type}：${d.count} 条（点击查看异常）`)
 
     g.selectAll('text.value')
-      .data(buckets)
+      .data(reasons)
       .join('text')
       .attr('class', 'value')
-      .attr('x', (d) => (x(d.label) ?? 0) + x.bandwidth() / 2)
+      .attr('x', (d) => (x(d.type) ?? 0) + x.bandwidth() / 2)
       .attr('y', (d) => y(d.count) - 5)
       .attr('text-anchor', 'middle')
       .attr('fill', '#1f2d3d')
@@ -94,6 +92,7 @@ export default function DelayHistogram({
       .selectAll('text')
       .attr('fill', AXIS_COLOR)
       .attr('font-size', 11)
+      .text((d) => TYPE_LABEL[d as string] ?? d)
 
     g.append('g')
       .call(axisLeft(y).ticks(4).tickSize(0).tickPadding(6))
@@ -101,7 +100,7 @@ export default function DelayHistogram({
       .selectAll('text')
       .attr('fill', AXIS_COLOR)
       .attr('font-size', 10)
-  }, [buckets, width, height])
+  }, [reasons, onSelect, width, height])
 
-  return <svg ref={ref} width={width} height={height} role="img" aria-label="延误分布直方图" />
+  return <svg ref={ref} width={width} height={height} role="img" aria-label="延误原因条形图" />
 }

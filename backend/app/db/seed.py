@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.core.security import hash_password
 from app.db.models.reference import Carrier, Location, User
 from app.db.models.shipment import Leg, Order, Shipment
-from app.db.models.tracking import MilestoneEvent
+from app.db.models.tracking import ExceptionRecord, MilestoneEvent
 from app.db.seed_data import CARRIERS, INLAND, PORTS, ROUTES
 
 # 演示账号：让登录页开箱可用。口令只在 seed 阶段落库，运行期不参与任何逻辑
@@ -247,13 +247,130 @@ def seed_users(session: Session) -> int:
     return added
 
 
+def seed_completed_shipments(session: Session) -> int:
+    """幂等灌入一批已送达/延误运单：让分析页的准点率、趋势、延误原因有真实方差，而不是全绿。
+
+    按航线选承运商，计划到达时间散布在过去约 70 天内；约 1/4 判定为延误（实际到达晚于计划），
+    并为延误运单写入异常记录（delay/stalled/route_deviation 三类）以撑起「延误原因」图。
+    与在途演示运单用不同前缀，互不干扰、可重复执行。
+    """
+    prefix = "DEMO-DONE-"
+    existing = session.scalar(
+        select(func.count()).select_from(Shipment).where(Shipment.shipment_no.like(f"{prefix}%"))
+    )
+    if existing:
+        return 0
+
+    locations = {loc.code: loc for loc in session.scalars(select(Location)).all()}
+    carriers_by_mode: dict[str, list[Carrier]] = {}
+    for c in session.scalars(select(Carrier)).all():
+        carriers_by_mode.setdefault(c.mode, []).append(c)
+
+    random.seed(20240601)  # 固定随机源，重复 seed 数据一致
+    now = datetime.now()
+    added = 0
+    count = 40
+
+    for i in range(count):
+        route = random.choice(ROUTES)
+        origin_code, dest_code, mode = route["origin"], route["dest"], route["mode"]
+        if origin_code not in locations or dest_code not in locations or mode not in carriers_by_mode:
+            continue
+        origin, dest = locations[origin_code], locations[dest_code]
+        carrier = random.choice(carriers_by_mode[mode])
+
+        # 计划到达散布在过去 1~70 天，体现时间维度趋势
+        planned_arrival = now - timedelta(days=random.uniform(1, 70))
+        # 约 75% 准时（实际到达 ≤ 计划），25% 延误（晚 2~72 小时）
+        delayed = random.random() < 0.25
+        if delayed:
+            actual_arrival = planned_arrival + timedelta(hours=random.uniform(2, 72))
+            status = "delayed"
+        else:
+            actual_arrival = planned_arrival - timedelta(hours=random.uniform(0, 12))
+            status = "delivered"
+        departure = planned_arrival - timedelta(days=_DEMO_MODE_DAYS.get(mode, 10))
+
+        order = Order(
+            order_no=f"ORD-DONE-{now.strftime('%Y%m%d')}-{i + 1:04d}",
+            customer_name=random.choice(_DEMO_CUSTOMERS),
+            status="created",
+        )
+        session.add(order)
+        session.flush()
+
+        shipment = Shipment(
+            shipment_no=f"{prefix}{i + 1:04d}",
+            status=status,
+            order_id=order.id,
+            origin_id=origin.id,
+            dest_id=dest.id,
+            carrier_id=carrier.id,
+            planned_departure=departure,
+            planned_arrival=planned_arrival,
+            actual_departure=departure,
+            actual_arrival=actual_arrival,
+            created_at=departure,
+        )
+        session.add(shipment)
+        session.flush()
+
+        # 主段 + 送达里程碑，保证详情页与事件流有内容
+        session.add(
+            Leg(
+                shipment_id=shipment.id,
+                seq=1,
+                mode=mode,
+                origin_id=origin.id,
+                dest_id=dest.id,
+                planned_start=departure,
+                planned_end=planned_arrival,
+                status="completed",
+            )
+        )
+        session.add(
+            MilestoneEvent(
+                shipment_id=shipment.id,
+                leg_id=None,
+                event_type="delivered" if status == "delivered" else "delayed",
+                occurred_at=actual_arrival,
+            )
+        )
+        # 延误运单写异常记录，类型在三类里按权重取，撑起延误原因分析
+        if delayed:
+            ex_type = random.choices(
+                ["delay", "stalled", "route_deviation"],
+                weights=[0.6, 0.25, 0.15],
+            )[0]
+            level = "critical" if random.random() < 0.4 else "warning"
+            detail = {
+                "delay": "实际到达晚于计划窗口",
+                "stalled": "干线在中转港滞留超阈值",
+                "route_deviation": "实际航线偏离申报路径",
+            }[ex_type]
+            session.add(
+                ExceptionRecord(
+                    shipment_id=shipment.id,
+                    type=ex_type,
+                    level=level,
+                    detail=detail,
+                    detected_at=actual_arrival,
+                )
+            )
+        added += 1
+
+    session.commit()
+    return added
+
+
 def main() -> None:
     engine = create_engine(settings.mysql_dsn_sync, future=True)
     with Session(engine) as session:
         added_locations = seed_locations(session)
         added_carriers = seed_carriers(session)
         added_users = seed_users(session)
-        added_shipments = seed_shipments(session)
+        added_in_transit = seed_shipments(session)
+        added_done = seed_completed_shipments(session)
 
     print(
         f"新增地点 {added_locations} 个，新增承运商 {added_carriers} 个，新增账号 {added_users} 个"
@@ -264,7 +381,7 @@ def main() -> None:
         f"承运商总数 {len(CARRIERS)}（已存在则更新，不重复插入）"
     )
     print(f"演示账号：{', '.join(f'{u} / {p}' for u, p, _ in DEMO_USERS)}")
-    print(f"新增演示运单 {added_shipments} 条（运输中）")
+    print(f"新增演示运单 {added_in_transit} 条（运输中），{added_done} 条（已送达/延误）")
 
 
 if __name__ == "__main__":

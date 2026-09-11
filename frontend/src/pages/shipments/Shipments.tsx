@@ -1,10 +1,10 @@
 import { Button, Input, Select, Space, Table, Tag, Tooltip, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
-import { useState, type MouseEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { getShipments } from '@/api/shipments'
+import { useEffect, useState, type MouseEvent } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { getCarriers, getShipments } from '@/api/shipments'
 import { STATUS_OPTIONS, statusColor, statusLabel } from '@/constants/shipments'
-import type { ShipmentBrief, ShipmentStatus } from '@/types/shipments'
+import type { CarrierOption, ShipmentBrief, ShipmentStatus } from '@/types/shipments'
 import { usePagedResource } from '@/hooks/usePagedResource'
 import ErrorState from '@/components/feedback/ErrorState'
 import { CopyOutlined, CheckOutlined } from '@ant-design/icons'
@@ -124,6 +124,18 @@ const columns: TableColumnsType<ShipmentBrief> = [
 
 export default function Shipments() {
   const navigate = useNavigate()
+  // 下钻入口：分析页点击承运商 / 延误区间会带 carrier_id / status 跳转到这里
+  const [searchParams] = useSearchParams()
+  const [carrierOptions, setCarrierOptions] = useState<CarrierOption[]>([])
+
+  // 初始筛选从 URL 取（首次进入即应用下钻条件）
+  const initStatus = (searchParams.get('status') as ShipmentStatus | null) ?? null
+  const initCarrier = searchParams.get('carrier_id')
+  const initFilters = {
+    status: initStatus,
+    shipment_no: '',
+    carrier_id: initCarrier ? Number(initCarrier) : null,
+  }
 
   // 列表取数交给统一 hook：分页与筛选状态、空值兜底全部收敛。
   // 自动重试、断网与页面重新可见的自愈、竞态保护由 useAsyncResource 继承，
@@ -139,17 +151,31 @@ export default function Shipments() {
     setFilters,
     setPage,
     setPageSize,
-  } = usePagedResource<ShipmentBrief, { status: ShipmentStatus | null; shipment_no: string }>(
-    (p) => getShipments(p),
-    {
-      status: null,
-      shipment_no: '',
-    },
-  )
+  } = usePagedResource<
+    ShipmentBrief,
+    { status: ShipmentStatus | null; shipment_no: string; carrier_id: number | null }
+  >((p) => getShipments(p), initFilters)
 
   // 搜索框的本地输入态：受控显示用户输入，避免受控值不更新导致打不进字；
   // 真正的查询条件提交到 filters 时才发起请求（见下方 onSearch）。
   const [keyword, setKeyword] = useState(filters.shipment_no)
+
+  // 承运商下拉项：下钻筛选时渲染
+  useEffect(() => {
+    getCarriers()
+      .then(setCarrierOptions)
+      .catch(() => {})
+  }, [])
+
+  // URL 变化（外部下钻跳转）时同步筛选条件；本地操作不写 URL，故不会触发循环
+  useEffect(() => {
+    const cid = searchParams.get('carrier_id')
+    const st = (searchParams.get('status') as ShipmentStatus | null) ?? null
+    setKeyword('')
+    setFilters({ status: st, shipment_no: '', carrier_id: cid ? Number(cid) : null })
+    // 仅在 searchParams 变化时执行；setFilters 为稳定引用
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams])
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
@@ -160,7 +186,21 @@ export default function Shipments() {
           style={{ width: 160 }}
           options={STATUS_OPTIONS}
           value={filters.status ?? undefined}
-          onChange={(v) => setFilters({ status: v ?? null, shipment_no: keyword })}
+          onChange={(v) =>
+            setFilters({ status: v ?? null, shipment_no: keyword, carrier_id: filters.carrier_id })
+          }
+        />
+        <Select
+          allowClear
+          showSearch
+          placeholder="按承运商筛选"
+          style={{ width: 200 }}
+          optionFilterProp="label"
+          options={carrierOptions.map((c) => ({ label: c.name, value: c.id }))}
+          value={filters.carrier_id ?? undefined}
+          onChange={(v) =>
+            setFilters({ status: filters.status, shipment_no: keyword, carrier_id: v ?? null })
+          }
         />
         <Input.Search
           allowClear
@@ -172,12 +212,20 @@ export default function Shipments() {
           onChange={(e) => {
             setKeyword(e.target.value)
             if (e.target.value === '') {
-              setFilters({ status: filters.status, shipment_no: '' })
+              setFilters({
+                status: filters.status,
+                shipment_no: '',
+                carrier_id: filters.carrier_id,
+              })
             }
           }}
           onSearch={(v) => {
             setKeyword(v.trim())
-            setFilters({ status: filters.status, shipment_no: v.trim() })
+            setFilters({
+              status: filters.status,
+              shipment_no: v.trim(),
+              carrier_id: filters.carrier_id,
+            })
           }}
         />
       </Space>

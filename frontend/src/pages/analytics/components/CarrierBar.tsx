@@ -10,6 +10,8 @@ import type { CarrierMetric } from '@/types/analytics'
 
 interface Props {
   carriers: CarrierMetric[]
+  /** 点击某承运商柱体下钻到运单列表（按该承运商筛选）；未知承运商（id 为 null）不可点。 */
+  onSelectCarrier?: (carrierId: number) => void
   width?: number
   height?: number
 }
@@ -18,8 +20,18 @@ const ON_TIME_COLOR = '#2ea043'
 const DELAYED_COLOR = '#f0a020'
 const AXIS_COLOR = '#5b6b7d'
 
-export default function CarrierBar({ carriers, width = 460, height = 280 }: Props) {
+export default function CarrierBar({
+  carriers,
+  onSelectCarrier,
+  width = 460,
+  height = 280,
+}: Props) {
   const ref = useRef<SVGSVGElement | null>(null)
+  // 回调只用于绑定点击事件，放进 ref 避免父组件重渲染时整张 SVG 重建
+  const onSelectCarrierRef = useRef(onSelectCarrier)
+  useEffect(() => {
+    onSelectCarrierRef.current = onSelectCarrier
+  }, [onSelectCarrier])
 
   useEffect(() => {
     const svg = select(ref.current)
@@ -70,6 +82,16 @@ export default function CarrierBar({ carriers, width = 460, height = 280 }: Prop
       .attr('width', x.bandwidth())
       .attr('height', (d) => y(d.seg[0]) - y(d.seg[1]))
       .attr('rx', 2)
+      .style('cursor', onSelectCarrierRef.current ? 'pointer' : 'default')
+      .on('click', (_e, d) => {
+        const id = d.seg.data.carrier_id
+        if (id != null) onSelectCarrierRef.current?.(id)
+      })
+      .append('title')
+      .text(
+        (d) =>
+          `${d.seg.data.name}\n准点率 ${Math.round(d.seg.data.on_time_rate * 100)}% (${d.seg.data.on_time}/${d.seg.data.total})`,
+      )
 
     g.selectAll('text.total')
       .data(rows)

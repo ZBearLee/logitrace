@@ -8,6 +8,7 @@ from sqlalchemy.orm import aliased
 
 from app.api.deps import current_user
 from app.api.schemas import (
+    CarrierOption,
     LegOut,
     MilestoneEventOut,
     PagedShipments,
@@ -30,6 +31,13 @@ LegOrigin = aliased(Location, name="leg_origin")
 LegDest = aliased(Location, name="leg_dest")
 
 
+@router.get("/carriers", response_model=list[CarrierOption])
+async def list_carriers(session: SessionDep) -> list[CarrierOption]:
+    """承运商下拉项：供分析页下钻筛选运单时渲染 Select。放在 /{shipment_id} 之前避免被路径参数吞掉。"""
+    rows = (await session.execute(select(Carrier.id, Carrier.name, Carrier.mode))).all()
+    return [CarrierOption(id=id, name=name, mode=mode) for id, name, mode in rows]
+
+
 @router.get("", response_model=PagedShipments)
 async def list_shipments(
     session: SessionDep,
@@ -37,14 +45,17 @@ async def list_shipments(
     page_size: int = Query(20, ge=1, le=100),
     status: str | None = Query(None, description="planned / in_transit / delivered / delayed"),
     shipment_no: str | None = Query(None, description="按运单号模糊匹配（部分即可）"),
+    carrier_id: int | None = Query(None, description="按承运商筛选，分析页点击承运商下钻时传入"),
 ) -> PagedShipments:
-    """运单列表：分页 + 按状态/运单号筛选，带出港口 code 和承运商名。"""
+    """运单列表：分页 + 按状态/运单号/承运商筛选，带出港口 code 和承运商名。"""
     conditions = []
     if status:
         conditions.append(Shipment.status == status)
     if shipment_no:
         # 模糊匹配，用户输入部分运单号即可定位（运单号含固定前缀，前缀检索仍有意义）
         conditions.append(Shipment.shipment_no.ilike(f"%{shipment_no}%"))
+    if carrier_id is not None:
+        conditions.append(Shipment.carrier_id == carrier_id)
 
     total = await session.scalar(select(func.count()).select_from(Shipment).where(*conditions))
 
