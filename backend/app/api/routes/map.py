@@ -11,10 +11,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
 
 from app.api.deps import current_user
-from app.api.schemas import MapLeg, MapOverview, MapPort, MapRoute
+from app.api.schemas import MapLeg, MapOverview, MapPort, MapRoute, MapStats
 from app.db.models.reference import Location
 from app.db.models.shipment import Leg, Shipment
-from app.db.models.tracking import PositionPoint
+from app.db.models.tracking import MilestoneEvent, PositionPoint
 from app.db.session import SessionDep
 
 router = APIRouter(prefix="/map", tags=["map"], dependencies=[Depends(current_user)])
@@ -134,3 +134,27 @@ async def map_overview(
             for s in shipments
         ],
     )
+
+
+@router.get("/stats", response_model=MapStats)
+async def map_stats(session: SessionDep) -> MapStats:
+    """大屏概览 KPI：运单按状态计数 + 今日（UTC 零点起）里程碑事件数。
+
+    一次聚合返回，避免前端把整张 events 表拉回来自己数；状态分布与今日事件
+    都是控制塔一眼要冲的全局数字。
+    """
+    rows = (
+        await session.execute(select(Shipment.status, func.count()).group_by(Shipment.status))
+    ).all()
+    by_status = {status: count for status, count in rows}
+    total = sum(by_status.values())
+    # DB 统一存 naive UTC：用 UTC 零点（naive）比较，避免拿 aware datetime 去比 naive 列报错
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_events = (
+        await session.scalar(
+            select(func.count())
+            .select_from(MilestoneEvent)
+            .where(MilestoneEvent.occurred_at >= today_start)
+        )
+    ) or 0
+    return MapStats(total=total, by_status=by_status, today_events=today_events)

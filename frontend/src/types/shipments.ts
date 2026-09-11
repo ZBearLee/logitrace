@@ -195,3 +195,10 @@ export interface MapOverview {
   ports: MapPort[]
   routes: MapRoute[]
 }
+
+/** 大屏概览 KPI：运单状态分布 + 今日事件数。 */
+export interface MapStats {
+  total: number
+  by_status: Record<string, number>
+  today_events: number
+}

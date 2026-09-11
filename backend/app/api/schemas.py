@@ -233,3 +233,11 @@ class MapOverview(BaseModel):
 
     ports: list[MapPort] = []
     routes: list[MapRoute] = []
+
+
+class MapStats(BaseModel):
+    """大屏概览 KPI：运单状态分布 + 今日里程碑事件数，一次聚合返回。"""
+
+    total: int = 0
+    by_status: dict[str, int] = {}
+    today_events: int = 0

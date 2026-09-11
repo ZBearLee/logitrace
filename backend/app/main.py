@@ -7,10 +7,12 @@ from app.api.routes import (
     events,
     exceptions,
     health,
-    map as map_routes,
     orders,
     realtime,
     shipments,
+)
+from app.api.routes import (
+    map as map_routes,
 )
 
 app = FastAPI(

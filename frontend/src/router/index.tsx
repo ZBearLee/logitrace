@@ -17,8 +17,8 @@ export const routes: AppRoute[] = [
   ...notificationsRoutes,
 ]
 
-// 默认落地到运单列表。
-export const DEFAULT_ROUTE = '/shipments'
+// 默认落地到大屏总览（带 KPI 概览卡片的控制塔主视图）。
+export const DEFAULT_ROUTE = '/dashboard'
 
 /**
  * 按 pathname 匹配路由，支持动态段（如 /shipments/:id 匹配 /shipments/12）。

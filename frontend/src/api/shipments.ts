@@ -12,6 +12,7 @@ import type {
   EventsQuery,
   ExceptionsQuery,
   MapOverview,
+  MapStats,
 } from '@/types/shipments'
 
 /** 运单列表：分页 + 按状态筛选。 */
@@ -67,4 +68,9 @@ export function getExceptions(q: ExceptionsQuery = {}) {
 /** 大屏地图聚合数据：港口 + 航线，一次请求拿全（避免按运单逐条请求）。 */
 export function getMapOverview() {
   return request<MapOverview>('/map/overview')
+}
+
+/** 大屏概览 KPI：运单状态分布 + 今日事件数。 */
+export function getMapStats() {
+  return request<MapStats>('/map/stats')
 }
