@@ -174,8 +174,10 @@ export interface MapLeg {
   dest_lat: number | null
   dest_lng: number | null
   status: string
-  /** 活动段最近轨迹点（[lng, lat] 升序）：「实际轨迹」的历史垫底 */
-  track: [number, number][]
+  /** 活动段最近轨迹点（[lng, lat, ts_ms] 升序）：
+   * 既是「实际轨迹」的历史垫底，也供时间轴回放按当前时刻切片；
+   * ts_ms 为 UTC epoch 毫秒。 */
+  track: [number, number, number][]
 }
 
 /** 大屏地图：运单航线，聚合各段供按运单着色与点击交互。 */

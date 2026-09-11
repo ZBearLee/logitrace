@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     DateTime,
+    Double,
     Enum,
     Float,
     ForeignKey,
@@ -37,8 +38,10 @@ class PositionPoint(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, autoincrement=True)
     leg_id: Mapped[int] = mapped_column(Integer, nullable=False)
-    lat: Mapped[float] = mapped_column(Float, nullable=False)
-    lng: Mapped[float] = mapped_column(Float, nullable=False)
+    # 坐标必须用 double：float 单精度经 MySQL 文本协议只回 6 位有效数字，
+    # 经度（整数部 2-3 位）小数位不足，会把轨迹量化成"横粗竖细"的直角楼梯
+    lat: Mapped[float] = mapped_column(Double, nullable=False)
+    lng: Mapped[float] = mapped_column(Double, nullable=False)
     speed: Mapped[float | None] = mapped_column(Float, nullable=True)
     heading: Mapped[float | None] = mapped_column(Float, nullable=True)
     recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)

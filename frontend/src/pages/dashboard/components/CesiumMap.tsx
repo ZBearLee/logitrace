@@ -4,6 +4,7 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { useWorldGeo } from '@/pages/shipments/components/worldGeo'
 import { connectPositions } from '@/api/ws'
+import { statusLabel } from '@/constants/shipments'
 import type { MapOverview } from '@/types/shipments'
 
 /** 初始视角：东经 105 / 北纬 20 上空 2400 万米，一屏俯瞰全球主要航线。 */
@@ -17,16 +18,16 @@ const LAND_FILL = '#1a3a5f'
 const PORT_COLOR = '#8ab4dd'
 
 /**
- * 数据层悬浮高度：航线/船位在地表上空 50km、地点在 5km。
- * 零高度的地物会和陆地多边形在同一深度打架，穿过陆地的线段会被遮掉
- * （看起来像「线被海洋切断」）；抬空后与陆地分层，近看也不陷球体，
- * 全球视角下这点高度完全不可见，近看反而有「浮在地图上方」的层次。
+ * 数据层悬浮高度：航线/船位只需抬离地表一点点。
+ * 抬空的目的是避开与陆地多边形同深度的 z-fight（零高度时穿过陆地的线会被陆地遮掉，
+ * 看着像「线被海洋切断」）；但抬得越高，斜视角下与地表的视差越大——转动/缩放时线会
+ * 明显「飘」离港口。取 2km 既分层又几乎不产生可见视差。
  */
-const ROUTE_HEIGHT = 50_000
-const PORT_HEIGHT = 5_000
-// 实际轨迹比计划航线高出一截：避免两条线在同一高度 z-fight，
-// 让「已走过」的实线始终压在虚线上面，而不是被虚线盖住。
-const TRAIL_HEIGHT = ROUTE_HEIGHT + 1_000
+const ROUTE_HEIGHT = 2_000
+const PORT_HEIGHT = 500
+// 实际轨迹只比计划线高 20m：够避免同高 z-fight 让实线压在虚线之上，
+// 又不会因高度差在斜视角下与虚线错开一截（高 1km 时会明显错位）。
+const TRAIL_HEIGHT = ROUTE_HEIGHT + 20
 
 /** 运单状态 → 航线与当前位置点的颜色。 */
 const ROUTE_COLOR: Record<string, string> = {
@@ -36,6 +37,9 @@ const ROUTE_COLOR: Record<string, string> = {
   delayed: '#f0a020',
 }
 
+/** 状态筛选按钮的顺序：控制塔最关心的排前面。 */
+const STATUS_ORDER: string[] = ['in_transit', 'delayed', 'delivered', 'planned']
+
 /** 实体 id 前缀：点击拾取时按前缀区分航线/尾迹/当前位置/港口。 */
 const ID_ROUTE = 'route:'
 const ID_TRAIL = 'trail:'
@@ -43,16 +47,29 @@ const ID_POS = 'pos:'
 const ID_PORT = 'port:'
 
 /**
- * 已走过/已送达画实线（亮青），未经过画虚线（暗），和运单详情保持一致。
+ * 大屏统一规则里的「实际轨迹」色（亮青）：已走过 / 已送达画青色实线，计划 / 未走画虚线。
+ * 详情页按段用 TRACK_COLORS 多色区分单票的多段；大屏一屏几十票，用单一青色表达
+ * 「实际轨迹」才不花——两者语义一致、配色不同。
  * 实际轨迹从段原点开始，避免后端只返回最近点时看起来从中间冒出来。
  */
 const ACTUAL_COLOR = '#3fd0c9'
 
-/** 单条尾迹保留的点数上限：超出丢头部，避免长时间挂着让数组无限增长。 */
+/** 单条尾迹保留的点数上限：超出只裁中间点、保留段原点，避免数组无限增长。 */
 const TRAIL_MAX_POINTS = 240
 
 /** 与上一点距离小于该值（米）的位置点丢弃：模拟器高频上报，过滤零位移抖动。 */
 const MIN_TRAIL_STEP = 10
+
+/**
+ * 回放倍速档位：multiplier = 1 个真实秒推进多少回放秒。
+ * 历史窗口约 6 小时，60× 约 6 分钟播完、1800× 约 12 秒，覆盖「细看」到「快览」。
+ */
+const REPLAY_SPEEDS = [
+  { label: '1×', value: 1 },
+  { label: '60×', value: 60 },
+  { label: '300×', value: 300 },
+  { label: '1800×', value: 1800 },
+] as const
 
 type Ring = number[][]
 type Rings = Ring[]
@@ -122,8 +139,22 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
   const lastPosAtRef = useRef<number | null>(null)
 
   const [card, setCard] = useState<InfoCard | null>(null)
-  // 默认只盯在途与延误（控制塔真正要看的），可切回全部运单看全球航线网
-  const [viewMode, setViewMode] = useState<'active' | 'all'>('active')
+  // 状态筛选：独立多选，默认只盯在途（控制塔最关心的实时位置）
+  const [statusFilter, setStatusFilter] = useState<Set<string>>(() => new Set(['in_transit']))
+  // 聚焦运单：选中后地图只画这一票并飞镜头过去。
+  // 多票跑在同一条航线上时线会完全重叠，聚焦是唯一能把它们分开看的手段。
+  const [focusId, setFocusId] = useState<number | null>(null)
+  const [shipQuery, setShipQuery] = useState('')
+
+  // 实时 / 历史回放两种模式：回放由 Cesium Clock 驱动，实时走 WS 增量。
+  const [mode, setMode] = useState<'live' | 'replay'>('live')
+  const [playing, setPlaying] = useState(true)
+  const [speed, setSpeed] = useState(60)
+  // WS 回调（命令式代码，脱离 React 渲染）要读最新模式，用 ref 桥接
+  const modeRef = useRef<'live' | 'replay'>('live')
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
 
   useEffect(() => {
     const container = containerRef.current
@@ -279,23 +310,27 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     if (ds == null) return
     ds.entities.removeAll()
     if (data == null) return
+    // 聚焦优先：选中某票时只画它（多票同路会完全重叠）；否则按勾选的状态过滤。
     const routes =
-      viewMode === 'all'
-        ? data.routes
-        : data.routes.filter((r) => r.status === 'in_transit' || r.status === 'delayed')
+      focusId != null
+        ? data.routes.filter((r) => r.shipment_id === focusId)
+        : data.routes.filter((r) => statusFilter.has(r.status))
 
-    // 位置流只给 leg_id，先把映射建好（覆盖全部运单，切换筛选不用重建）。
-    // 尾迹数据本身留在 ref 里：重拉 overview 不该清空已经走过的轨迹。
+    // 位置流只给 leg_id，先把映射建好。只登记「当前可见」的段：
+    // 被筛掉的段不再收位置增量，否则实时回调会把已隐藏的尾迹又画回来。
+    // 尾迹数据本身留在 ref 里：重拉 overview 或切筛选都不清空已走过的轨迹。
     const legToShipment = new Map<number, number>()
-    for (const route of data.routes) {
+    for (const route of routes) {
       for (const leg of route.legs) legToShipment.set(leg.leg_id, route.shipment_id)
     }
     legToShipmentRef.current = legToShipment
 
-    // 航线：每段按「已走过 / 未经过 / 已完成」分样式，和运单详情保持一致：
-    // - 已送达/已完成段：全实线
-    // - 活动中段：已走过（实际轨迹）实线，未经过虚线
-    // - 计划中/跳过段：全虚线
+    // 航线：一条清晰规则——**虚线 = 计划航段（未走），青色实线 = 实际轨迹（已走过）**。
+    // - 已完成 / 已送达段：整段都走过 → 青色实线
+    // - 活动 / 计划 / 跳过段：整段计划虚线（状态色）做底；活动段的已走部分由青色尾迹
+    //   压在虚线之上，形成「一条线、走过 vs 未走分色」。
+    // 整段虚线做底（而非只画剩余段），保证没有轨迹数据时也有线、不断线，
+    // 且虚线起点始终是段原点，不随实时位置漂移（回放时也不再锚死在实时 latest）。
     for (const route of routes) {
       const color = Cesium.Color.fromCssColorString(ROUTE_COLOR[route.status] ?? '#6e7681')
       const isDelivered = route.status === 'delivered'
@@ -311,45 +346,24 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         const dest = Cesium.Cartesian3.fromDegrees(dLng, dLat, ROUTE_HEIGHT)
         // 记住每段原点：实时位置流只给当前点，尾迹需要从原点开始画。
         // 尾迹用 TRAIL_HEIGHT，比计划航线高一点，避免 z-fight 被虚线盖住。
-        legOriginRef.current.set(leg.leg_id, Cesium.Cartesian3.fromDegrees(oLng, oLat, TRAIL_HEIGHT))
+        legOriginRef.current.set(
+          leg.leg_id,
+          Cesium.Cartesian3.fromDegrees(oLng, oLat, TRAIL_HEIGHT),
+        )
 
-        const isCompletedLeg = leg.status === 'completed'
-        const isActiveLeg = leg.status === 'active'
-
-        if (isDelivered || isCompletedLeg) {
-          // 已送达/已完成：全实线
+        if (isDelivered || leg.status === 'completed') {
+          // 已完成/已送达：整段都是实际轨迹 → 青色实线（与图例一致）
           ds.entities.add({
             id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
             polyline: {
               positions: [origin, dest],
               width: 2,
-              material: color.withAlpha(0.95),
+              material: Cesium.Color.fromCssColorString(ACTUAL_COLOR).withAlpha(0.95),
             },
           })
-        } else if (isActiveLeg) {
-          // 活动中：未经过部分从当前位置画虚线到终点
-          const track = leg.track
-          const current =
-            track.length > 0
-              ? track[track.length - 1]
-              : [route.latest_lng, route.latest_lat]
-          const [curLng, curLat] = current
-          if (curLng != null && curLat != null) {
-            const currentPos = Cesium.Cartesian3.fromDegrees(curLng, curLat, ROUTE_HEIGHT)
-            ds.entities.add({
-              id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
-              polyline: {
-                positions: [currentPos, dest],
-                width: 2,
-                material: new Cesium.PolylineDashMaterialProperty({
-                  color: color.withAlpha(0.65),
-                  dashLength: 16,
-                }),
-              },
-            })
-          }
         } else {
-          // 计划中 / 跳过：全虚线
+          // 未完成（活动/计划/跳过）：整段计划虚线做底，状态色区分运单；
+          // 活动段的已走部分由青色尾迹压在虚线之上
           ds.entities.add({
             id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
             polyline: {
@@ -364,8 +378,69 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         }
       }
 
-      // 船位亮点只给在途/延误画：已送达运单的 latest 停在终点，画出来会被误认成船位
-      if (
+      if (mode === 'replay') {
+        // 历史回放：船位由 SampledPositionProperty 随时间插值，尾迹按当前时刻切片。
+        // track 已按时间升序（后端按 rn desc 取，即旧→新）。
+        for (const leg of route.legs) {
+          if (leg.track.length === 0) continue
+          const samples = leg.track.map(
+            ([lng, lat, ts]) =>
+              [ts, Cesium.Cartesian3.fromDegrees(lng, lat, TRAIL_HEIGHT)] as const,
+          )
+          const prop = new Cesium.SampledPositionProperty()
+          for (const [ts, pos] of samples) {
+            prop.addSample(Cesium.JulianDate.fromDate(new Date(ts)), pos)
+          }
+          prop.setInterpolationOptions({
+            interpolationDegree: 1,
+            interpolationAlgorithm: Cesium.LinearApproximation,
+          })
+          // 端点外保持不动：多段运单各段样本区间不同，避免时钟越过区间时船位点闪没
+          prop.forwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+          prop.backwardExtrapolationType = Cesium.ExtrapolationType.HOLD
+          ds.entities.add({
+            id: `${ID_POS}${route.shipment_id}`,
+            position: prop,
+            point: {
+              pixelSize: 6,
+              color,
+              outlineWidth: 1,
+              outlineColor: Cesium.Color.WHITE.withAlpha(0.6),
+            },
+          })
+          // 已走过（实线）：从段原点起笔，只画 ts <= 当前回放时刻的点，
+          // 随时间生长；计划虚线在底层不动，两者衔接自然。
+          // 回调每帧重算，但只做切片（笛卡尔已预计算），成本与点数成正比、与帧数无关。
+          if (samples.length >= 2) {
+            const originPt = legOriginRef.current.get(leg.leg_id)
+            ds.entities.add({
+              id: `${ID_TRAIL}${leg.leg_id}`,
+              polyline: {
+                positions: new Cesium.CallbackProperty(() => {
+                  const out: Cesium.Cartesian3[] = []
+                  // 段原点始终在首位：后端只给最近点，缺了它实线会从中间冒出来
+                  if (originPt != null) out.push(originPt)
+                  const viewer = viewerRef.current
+                  if (viewer == null) {
+                    out.push(...samples.map(([, p]) => p))
+                    return out
+                  }
+                  const now = Cesium.JulianDate.toDate(viewer.clock.currentTime).getTime()
+                  for (const [ts, p] of samples) {
+                    if (ts <= now) out.push(p)
+                    else break
+                  }
+                  return out.length >= 2 ? out : []
+                }, false),
+                width: 3,
+                material: Cesium.Color.fromCssColorString(ACTUAL_COLOR).withAlpha(0.95),
+              },
+            })
+          }
+        }
+      } else if (
+        // 实时模式：船位亮点只给在途/延误画：已送达运单的 latest 停在终点，
+        // 画出来会被误认成船位
         (route.status === 'in_transit' || route.status === 'delayed') &&
         route.latest_lat != null &&
         route.latest_lng != null
@@ -414,7 +489,40 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         },
       })
     }
-  }, [data, viewMode])
+
+    // 回放模式下配置 Clock：时间窗取自所有样本的 [最早, 最晚]。
+    // 只在这里设范围与当前时刻，multiplier/shouldAnimate 交给下面的专用 effect，
+    // 避免「暂停/调倍速」触发本 effect 重建全部实体。
+    if (mode === 'replay') {
+      let tMin = Number.POSITIVE_INFINITY
+      let tMax = Number.NEGATIVE_INFINITY
+      for (const route of routes) {
+        for (const leg of route.legs) {
+          for (const [, , ts] of leg.track) {
+            if (ts < tMin) tMin = ts
+            if (ts > tMax) tMax = ts
+          }
+        }
+      }
+      const viewer = viewerRef.current
+      if (viewer != null && Number.isFinite(tMin) && tMax > tMin) {
+        const start = Cesium.JulianDate.fromDate(new Date(tMin))
+        const stop = Cesium.JulianDate.fromDate(new Date(tMax))
+        const clock = viewer.clock
+        clock.startTime = start.clone()
+        clock.stopTime = stop.clone()
+        clock.clockRange = Cesium.ClockRange.LOOP_STOP
+        // 当前时刻越界（首次进入回放时通常已是实时「现在」）才回到起点；
+        // 数据刷新时若仍在窗内则保持，不打断正在进行的回放
+        if (
+          Cesium.JulianDate.lessThan(clock.currentTime, start) ||
+          Cesium.JulianDate.greaterThan(clock.currentTime, stop)
+        ) {
+          clock.currentTime = start.clone()
+        }
+      }
+    }
+  }, [data, statusFilter, focusId, mode])
 
   /**
    * 实时轨迹层：订阅位置流 → 累积尾迹 + 移动船位点。
@@ -438,6 +546,8 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     }
 
     const stop = connectPositions((msg) => {
+      // 回放模式下画面由 Clock 驱动，忽略实时增量，避免两套逻辑互相打架
+      if (modeRef.current !== 'live') return
       const shipmentId = legToShipmentRef.current.get(msg.leg_id)
       if (shipmentId == null) return
       const point = Cesium.Cartesian3.fromDegrees(msg.lng, msg.lat, TRAIL_HEIGHT)
@@ -453,7 +563,9 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
       // 与上一个点几乎重合就丢掉：过滤高频上报的零位移抖动，否则尾迹点数暴涨
       if (last != null && Cesium.Cartesian3.distance(last, point) < MIN_TRAIL_STEP) return
       pts.push(point)
-      if (pts.length > TRAIL_MAX_POINTS) pts.shift()
+      // 超出上限只裁中间点、保留 pts[0] 的段原点：起点一旦被裁掉，
+      // 「已走过」实线就会缩成悬在计划虚线中间的一段（两头只剩虚线）。
+      while (pts.length > TRAIL_MAX_POINTS) pts.splice(1, 1)
 
       const ds = routeDsRef.current
       if (ds != null) {
@@ -473,6 +585,22 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     }
   }, [])
 
+  /**
+   * 回放时钟：只管「走不走」和「走多快」，不重建实体。
+   * 与数据 effect 分离，使暂停/调倍速只改 Clock 两个字段，零几何开销。
+   */
+  useEffect(() => {
+    const viewer = viewerRef.current
+    if (viewer == null) return
+    if (mode !== 'replay') {
+      // 离开回放：停表，避免时钟继续空转
+      viewer.clock.shouldAnimate = false
+      return
+    }
+    viewer.clock.multiplier = speed
+    viewer.clock.shouldAnimate = playing
+  }, [mode, playing, speed])
+
   /** 回到初始全球视角：拖动/缩放迷失方向后一键复位。 */
   const resetView = () => {
     viewerRef.current?.camera.setView({
@@ -480,26 +608,153 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     })
   }
 
+  /** 放大 / 缩小：按当前视高比例推进，给滚轮之外一个可控入口。 */
+  const zoomBy = (factor: number) => {
+    const viewer = viewerRef.current
+    if (viewer == null) return
+    viewer.camera.zoomIn(viewer.camera.positionCartographic.height * factor)
+  }
+
+  /**
+   * 聚焦某票：只画这一票，并把镜头飞到它所有段（含轨迹点）的包围球。
+   * 多票跑在同一条航线上时线会完全重叠，聚焦是唯一能把它们分开看的手段。
+   */
+  const focusShipment = (shipmentId: number) => {
+    setFocusId(shipmentId)
+    setShipQuery('')
+    const viewer = viewerRef.current
+    const snapshot = dataRef.current
+    if (viewer == null || snapshot == null) return
+    const route = snapshot.routes.find((r) => r.shipment_id === shipmentId)
+    if (route == null) return
+    const pts: Cesium.Cartesian3[] = []
+    for (const leg of route.legs) {
+      if (leg.origin_lat != null && leg.origin_lng != null) {
+        pts.push(Cesium.Cartesian3.fromDegrees(leg.origin_lng, leg.origin_lat))
+      }
+      if (leg.dest_lat != null && leg.dest_lng != null) {
+        pts.push(Cesium.Cartesian3.fromDegrees(leg.dest_lng, leg.dest_lat))
+      }
+      for (const [lng, lat] of leg.track) pts.push(Cesium.Cartesian3.fromDegrees(lng, lat))
+    }
+    if (pts.length === 0) return
+    const sphere = Cesium.BoundingSphere.fromPoints(pts)
+    viewer.camera.flyToBoundingSphere(sphere, {
+      // 俯视 + 留 5 倍半径余量，保证整条线（含两端）都在视野内
+      offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, Math.max(sphere.radius * 5, 100_000)),
+      duration: 1.2,
+    })
+  }
+
+  // 搜索下拉的匹配项：按运单号模糊匹配，最多 20 条；已聚焦时不显示
+  const matches =
+    data == null || focusId != null || shipQuery.trim() === ''
+      ? []
+      : data.routes
+          .filter((r) => r.shipment_no.toLowerCase().includes(shipQuery.trim().toLowerCase()))
+          .slice(0, 20)
+
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
       <div style={{ position: 'absolute', top: 16, left: 16, display: 'flex', gap: 8 }}>
-        <select
-          value={viewMode}
-          onChange={(e) => setViewMode(e.target.value as 'active' | 'all')}
-          style={{
-            cursor: 'pointer',
-            background: 'rgba(13,30,51,0.85)',
-            border: '1px solid #274a6e',
-            borderRadius: 6,
-            padding: '6px 8px',
-            color: '#c9d7e8',
-            fontSize: 12,
-          }}
-        >
-          <option value="active">在途 + 延误</option>
-          <option value="all">全部运单</option>
-        </select>
+        {/* 状态筛选：独立多选，可任意组合（默认在途），不再用「全部运单」这种粗档 */}
+        {STATUS_ORDER.map((s) => {
+          const on = statusFilter.has(s)
+          return (
+            <button
+              key={s}
+              onClick={() =>
+                setStatusFilter((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(s)) next.delete(s)
+                  else next.add(s)
+                  return next
+                })
+              }
+              style={{
+                cursor: 'pointer',
+                background: on ? `${ROUTE_COLOR[s]}33` : 'rgba(13,30,51,0.85)',
+                border: `1px solid ${on ? ROUTE_COLOR[s] : '#274a6e'}`,
+                borderRadius: 6,
+                padding: '6px 10px',
+                color: on ? '#e6f0fb' : '#8aa4c0',
+                fontSize: 12,
+              }}
+            >
+              {statusLabel(s)}
+            </button>
+          )
+        })}
+        {/* 运单搜索：输单号选中即聚焦该票，地图只画它并飞过去，不用再去图上点 */}
+        <div style={{ position: 'relative' }}>
+          <input
+            value={shipQuery}
+            onChange={(e) => setShipQuery(e.target.value)}
+            placeholder="搜索运单号"
+            style={{
+              width: 180,
+              background: 'rgba(13,30,51,0.85)',
+              border: '1px solid #274a6e',
+              borderRadius: 6,
+              padding: '6px 10px',
+              color: '#c9d7e8',
+              fontSize: 12,
+              outline: 'none',
+            }}
+          />
+          {matches.length > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '110%',
+                left: 0,
+                width: 260,
+                maxHeight: 240,
+                overflowY: 'auto',
+                background: 'rgba(13,30,51,0.96)',
+                border: '1px solid #274a6e',
+                borderRadius: 6,
+                zIndex: 10,
+              }}
+            >
+              {matches.map((r) => (
+                <div
+                  key={r.shipment_id}
+                  onClick={() => focusShipment(r.shipment_id)}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '6px 10px',
+                    fontSize: 12,
+                    color: '#c9d7e8',
+                    borderBottom: '1px solid rgba(39,74,110,0.4)',
+                  }}
+                >
+                  {r.shipment_no} · {statusLabel(r.status)}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        {focusId != null && (
+          <button
+            onClick={() => {
+              setFocusId(null)
+              resetView()
+            }}
+            style={{
+              cursor: 'pointer',
+              background: '#1f4e8c',
+              border: '1px solid #2f81f7',
+              borderRadius: 6,
+              padding: '6px 12px',
+              color: '#fff',
+              fontSize: 12,
+            }}
+          >
+            取消聚焦
+          </button>
+        )}
         <button
           style={{
             cursor: 'pointer',
@@ -514,29 +769,153 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         >
           复位视角
         </button>
-        <Heartbeat lastPosAtRef={lastPosAtRef} />
+        {/* 缩放按钮：滚轮之外多一个可控入口（触控板 / 远程桌面下滚轮手感不稳） */}
+        <button
+          title="放大"
+          style={{
+            cursor: 'pointer',
+            background: 'rgba(13,30,51,0.85)',
+            border: '1px solid #274a6e',
+            borderRadius: 6,
+            padding: '6px 12px',
+            color: '#c9d7e8',
+            fontSize: 12,
+          }}
+          onClick={() => zoomBy(0.4)}
+        >
+          ＋
+        </button>
+        <button
+          title="缩小"
+          style={{
+            cursor: 'pointer',
+            background: 'rgba(13,30,51,0.85)',
+            border: '1px solid #274a6e',
+            borderRadius: 6,
+            padding: '6px 12px',
+            color: '#c9d7e8',
+            fontSize: 12,
+          }}
+          onClick={() => zoomBy(-0.6)}
+        >
+          －
+        </button>
+        <button
+          style={{
+            cursor: 'pointer',
+            background: mode === 'replay' ? '#1f4e8c' : 'rgba(13,30,51,0.85)',
+            border: '1px solid #274a6e',
+            borderRadius: 6,
+            padding: '6px 12px',
+            color: '#c9d7e8',
+            fontSize: 12,
+          }}
+          onClick={() => setMode((m) => (m === 'live' ? 'replay' : 'live'))}
+        >
+          {mode === 'replay' ? '返回实时' : '历史回放'}
+        </button>
+        {mode === 'replay' && (
+          <>
+            <button
+              style={{
+                cursor: 'pointer',
+                background: 'rgba(13,30,51,0.85)',
+                border: '1px solid #274a6e',
+                borderRadius: 6,
+                padding: '6px 12px',
+                color: '#c9d7e8',
+                fontSize: 12,
+              }}
+              onClick={() => setPlaying((p) => !p)}
+            >
+              {playing ? '暂停' : '播放'}
+            </button>
+            <select
+              value={speed}
+              onChange={(e) => setSpeed(Number(e.target.value))}
+              title="回放倍速"
+              style={{
+                cursor: 'pointer',
+                background: 'rgba(13,30,51,0.85)',
+                border: '1px solid #274a6e',
+                borderRadius: 6,
+                padding: '6px 8px',
+                color: '#c9d7e8',
+                fontSize: 12,
+              }}
+            >
+              {REPLAY_SPEEDS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+          </>
+        )}
+        {/* 实时看链路心跳，回放看当前回放时刻 */}
+        {mode === 'live' ? (
+          <Heartbeat lastPosAtRef={lastPosAtRef} />
+        ) : (
+          <ReplayTime viewerRef={viewerRef} />
+        )}
       </div>
-      {/* 图例：与运单详情保持一致——已走过/已送达实线，未经过虚线 */}
+      {/* 图例：线型表达「计划 vs 实际」（虚线=计划未走 / 青色实线=实际已走），
+          颜色表达运单状态；大屏一屏多票，两套语义分开才读得懂 */}
       <div
         style={{
           position: 'absolute',
           top: 58,
           left: 16,
           display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
           gap: 14,
+          maxWidth: 560,
           fontSize: 11,
           color: '#9fb4cc',
         }}
       >
         <span>
           <LegendLine color="#8aa4c0" dashed />
-          未经过
+          计划航段 · 未走过
         </span>
         <span>
           <LegendLine color={ACTUAL_COLOR} />
-          已走过 / 已送达
+          实际轨迹 · 已走过
+        </span>
+        <span>
+          <LegendDot color={ROUTE_COLOR.in_transit} />
+          运输中
+        </span>
+        <span>
+          <LegendDot color={ROUTE_COLOR.delayed} />
+          延误
+        </span>
+        <span>
+          <LegendDot color={ROUTE_COLOR.delivered} />
+          已送达
+        </span>
+        <span>
+          <LegendDot color={ROUTE_COLOR.planned} />
+          已计划
         </span>
       </div>
+      {/* 回放时间轴：底部横条，拖动即定位到该时刻 */}
+      {mode === 'replay' && (
+        <div
+          style={{
+            position: 'absolute',
+            left: 24,
+            right: 24,
+            bottom: 24,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+          }}
+        >
+          <ReplayScrubber viewerRef={viewerRef} />
+        </div>
+      )}
       {/* 点击拾取到的信息卡：固定在右上角，不遮挡球面主体 */}
       {card != null && (
         <div
@@ -605,21 +984,43 @@ function LegendLine({ color, dashed }: { color: string; dashed?: boolean }) {
   )
 }
 
+/** 图例里的状态色圆点示意。 */
+function LegendDot({ color }: { color: string }) {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: '50%',
+        background: color,
+        marginRight: 5,
+        verticalAlign: 'middle',
+      }}
+    />
+  )
+}
+
 /**
  * 位置流心跳：绿点 = 正在实时推送（5s 内有消息）；黄点 + 时长 = 推送疑似中断；
  * 灰色 = 一次都没收到（链路没通）。配合图例回答「这屏数据是不是活的」。
  */
 function Heartbeat({ lastPosAtRef }: { lastPosAtRef: MutableRefObject<number | null> }) {
-  const [, tick] = useState(0)
+  const [color, setColor] = useState('#8aa4c0')
+  const [text, setText] = useState('等待位置推送')
+  // 在 effect 内读 ref 与 Date.now 写入 state，避免渲染期访问 ref / 调非纯函数
   useEffect(() => {
-    const id = window.setInterval(() => tick((n) => n + 1), 1000)
+    const tick = () => {
+      const last = lastPosAtRef.current
+      const ageSec = last == null ? null : Math.floor((Date.now() - last) / 1000)
+      const live = ageSec != null && ageSec <= 5
+      setColor(ageSec == null ? '#8aa4c0' : live ? '#2ea043' : '#f0a020')
+      setText(ageSec == null ? '等待位置推送' : live ? '实时' : `${ageSec}s 未更新`)
+    }
+    tick()
+    const id = window.setInterval(tick, 1000)
     return () => window.clearInterval(id)
-  }, [])
-  const last = lastPosAtRef.current
-  const ageSec = last == null ? null : Math.floor((Date.now() - last) / 1000)
-  const live = ageSec != null && ageSec <= 5
-  const color = ageSec == null ? '#8aa4c0' : live ? '#2ea043' : '#f0a020'
-  const text = ageSec == null ? '等待位置推送' : live ? '实时' : `${ageSec}s 未更新`
+  }, [lastPosAtRef])
   return (
     <span style={{ alignSelf: 'center', fontSize: 12, color }}>
       <span
@@ -635,5 +1036,99 @@ function Heartbeat({ lastPosAtRef }: { lastPosAtRef: MutableRefObject<number | n
       />
       {text}
     </span>
+  )
+}
+
+/** 回放当前时刻（UTC）：半秒自刷新；在 effect 内读时钟写入 state，避免渲染期访问 ref。 */
+function ReplayTime({ viewerRef }: { viewerRef: MutableRefObject<Cesium.Viewer | null> }) {
+  const [text, setText] = useState('—')
+  useEffect(() => {
+    const render = () => {
+      const clock = viewerRef.current?.clock
+      setText(
+        clock
+          ? `${Cesium.JulianDate.toIso8601(clock.currentTime).slice(0, 19).replace('T', ' ')}Z`
+          : '—',
+      )
+    }
+    render()
+    const id = window.setInterval(render, 500)
+    return () => window.clearInterval(id)
+  }, [viewerRef])
+  return <span style={{ alignSelf: 'center', fontSize: 12, color: '#9fb4cc' }}>{text}</span>
+}
+
+/** 从 Clock 读回放时间窗（epoch 毫秒）：范围无效时返回 null。 */
+function clockWindowMs(viewerRef: MutableRefObject<Cesium.Viewer | null>) {
+  const clock = viewerRef.current?.clock
+  if (clock == null) return null
+  const start = Cesium.JulianDate.toDate(clock.startTime).getTime()
+  const stop = Cesium.JulianDate.toDate(clock.stopTime).getTime()
+  return stop > start ? { start, stop } : null
+}
+
+/** 当前回放时刻在时间窗中的百分比（0-100）：无有效范围时返回 null。 */
+function clockPct(viewerRef: MutableRefObject<Cesium.Viewer | null>) {
+  const win = clockWindowMs(viewerRef)
+  const clock = viewerRef.current?.clock
+  if (win == null || clock == null) return null
+  const now = Cesium.JulianDate.toDate(clock.currentTime).getTime()
+  return Math.max(0, Math.min(100, ((now - win.start) / (win.stop - win.start)) * 100))
+}
+
+/** 按进度百分比定位回放时刻。写 Clock 收敛到模块函数，保持组件内为纯调用。 */
+function seekClock(viewerRef: MutableRefObject<Cesium.Viewer | null>, pct: number) {
+  const win = clockWindowMs(viewerRef)
+  const clock = viewerRef.current?.clock
+  if (win == null || clock == null) return
+  clock.currentTime = Cesium.JulianDate.fromDate(
+    new Date(win.start + ((win.stop - win.start) * pct) / 100),
+  )
+}
+
+/**
+ * 回放进度条：每 250ms 读一次 Clock 刷新进度；拖动时暂停跟随并写回 currentTime。
+ * 用 ref 标记拖动中，避免「跟随」把用户刚拖到的位置又冲掉。
+ */
+function ReplayScrubber({ viewerRef }: { viewerRef: MutableRefObject<Cesium.Viewer | null> }) {
+  const [pct, setPct] = useState(0)
+  const draggingRef = useRef(false)
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (draggingRef.current) return
+      const p = clockPct(viewerRef)
+      if (p != null) setPct(p)
+    }, 250)
+    return () => window.clearInterval(id)
+  }, [viewerRef])
+
+  const seek = (v: number) => {
+    setPct(v)
+    seekClock(viewerRef, v)
+  }
+
+  return (
+    <input
+      type="range"
+      min={0}
+      max={100}
+      step={0.1}
+      value={pct}
+      onChange={(e) => seek(Number(e.target.value))}
+      onMouseDown={() => {
+        draggingRef.current = true
+      }}
+      onMouseUp={() => {
+        draggingRef.current = false
+      }}
+      onTouchStart={() => {
+        draggingRef.current = true
+      }}
+      onTouchEnd={() => {
+        draggingRef.current = false
+      }}
+      style={{ width: '100%', cursor: 'pointer', accentColor: '#2f81f7' }}
+    />
   )
 }

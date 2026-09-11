@@ -11,6 +11,7 @@
 import json
 import time
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional
 
 import redis
@@ -23,6 +24,13 @@ from geo import bearing_deg, haversine_km, interpolate_great_circle
 def _utcnow() -> datetime:
     """MySQL 的 DateTime 不带时区，统一存 UTC 的 naive datetime。"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _json_default(o):
+    """json.dumps 兜底：DB 反射回来的坐标可能是 Decimal，转成 float 再序列化。"""
+    if isinstance(o, Decimal):
+        return float(o)
+    raise TypeError(f"Object of type {o.__class__.__name__} is not JSON serializable")
 
 
 def _leg_progress(start: datetime, end: datetime, now: datetime) -> float:
@@ -69,7 +77,20 @@ def _load_active_legs(engine, metadata):
         .where(legs_t.c.status != "completed")
     )
     with engine.connect() as conn:
-        return conn.execute(stmt).mappings().all()
+        rows = conn.execute(stmt).mappings().all()
+    # 经纬度从库里反射回来可能是 Decimal（locations.lat/lng 的实际列类型），
+    # round(Decimal, 6) 仍是 Decimal，而 json.dumps 不认 Decimal、Redis 也存不进去。
+    # 统一转 float，后续插值 / 序列化 / 写 Redis 都不再踩坑。
+    return [
+        {
+            **m,
+            "o_lat": float(m["o_lat"]),
+            "o_lng": float(m["o_lng"]),
+            "d_lat": float(m["d_lat"]),
+            "d_lng": float(m["d_lng"]),
+        }
+        for m in rows
+    ]
 
 
 def _emit_event(
@@ -315,7 +336,8 @@ def run() -> None:
                                 "speed": 0,
                                 "heading": round(fl_heading, 2),
                                 "ts": ts_iso,
-                            }
+                            },
+                            default=_json_default,
                         )
                         pipe.hset(
                             f"pos:{lid}",
@@ -360,7 +382,8 @@ def run() -> None:
                             "speed": round(speed, 2) if speed is not None else None,
                             "heading": round(heading, 2),
                             "ts": ts_iso,
-                        }
+                        },
+                        default=_json_default,
                     )
                     pipe.hset(
                         f"pos:{lid}",

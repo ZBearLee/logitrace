@@ -1,5 +1,4 @@
 // 运单相关接口：对齐后端 app/api/routes/shipments.py 的真实返回结构。
-// 业务闭环阶段统一走 client.ts 的 request()，将来鉴权在 request() 内注入即可。
 import { request } from '@/api/client'
 
 import type {

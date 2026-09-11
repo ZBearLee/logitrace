@@ -68,5 +68,4 @@ export function getHealth() {
   return request<HealthResponse>('/health')
 }
 
-// 业务闭环阶段在此追加：getShipments / getExceptions ... 均复用 request()
-// 鉴权头已在 request() 内统一注入，新增接口无需各自处理
+// 新增接口（getShipments / getExceptions ...）均复用 request()，鉴权头已在内部统一注入。

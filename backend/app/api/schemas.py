@@ -210,8 +210,10 @@ class MapLeg(BaseModel):
     dest_lat: float | None = None
     dest_lng: float | None = None
     status: str
-    # 活动段最近轨迹点（[lng, lat] 升序）：大屏「实际轨迹」用历史垫底才可见，
-    # 否则实时尾迹从连上那刻才开始累积，慢速船几分钟内画不出可见长度
+    # 活动段最近轨迹点（[lng, lat, ts_ms] 升序）：
+    # - ts_ms 为 UTC epoch 毫秒，供大屏时间轴回放按当前时刻切片；
+    # - 大屏「实际轨迹」用历史垫底才可见，否则实时尾迹从连上那刻才开始累积，
+    #   慢速船几分钟内画不出可见长度
     track: list[list[float]] = []
 
 

@@ -4,6 +4,8 @@
 大屏要对几十条运单画线，逐条请求就是 N+1，所以单独提供这个聚合读法。
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
 from sqlalchemy.orm import aliased
@@ -20,6 +22,15 @@ router = APIRouter(prefix="/map", tags=["map"], dependencies=[Depends(current_us
 # 航线段的两端都指向 locations，用别名区分两次 join（与 shipments 路由同一套写法）
 Origin = aliased(Location, name="origin")
 Dest = aliased(Location, name="dest")
+
+
+def _epoch_ms(dt: datetime) -> int:
+    """UTC naive datetime → epoch 毫秒。
+
+    DB 统一存 UTC、且是 naive（见 simulator/config.py），这里补上 UTC 时区再转，
+    避免 .timestamp() 按服务器本地时区解释导致时间轴整体偏移。
+    """
+    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
 
 
 @router.get("/overview", response_model=MapOverview)
@@ -83,21 +94,28 @@ async def map_overview(
             .label("rn")
         )
         recent = (
-            select(PositionPoint.leg_id, PositionPoint.lng, PositionPoint.lat, rn)
+            select(
+                PositionPoint.leg_id,
+                PositionPoint.lng,
+                PositionPoint.lat,
+                PositionPoint.recorded_at,
+                rn,
+            )
             .where(PositionPoint.leg_id.in_(active_leg_ids))
             .subquery()
         )
         track_rows = (
             await session.execute(
-                select(recent.c.leg_id, recent.c.lng, recent.c.lat)
+                select(recent.c.leg_id, recent.c.lng, recent.c.lat, recent.c.recorded_at)
                 # 模拟器每 60s 落一个点：360 点 ≈ 6 小时航程 ≈ 200km，缩放到位图上
                 # 才是一段肉眼可见的线；60 点只有 30km，全球视角下不足 1 像素
                 .where(recent.c.rn <= 360)
                 .order_by(recent.c.leg_id, recent.c.rn.desc())
             )
         ).all()
-        for leg_id, lng, lat in track_rows:
-            tracks.setdefault(leg_id, []).append([lng, lat])
+        for leg_id, lng, lat, recorded_at in track_rows:
+            # 带上时间戳：前端时间轴回放靠它把「已走过」按当前时刻切片
+            tracks.setdefault(leg_id, []).append([lng, lat, _epoch_ms(recorded_at)])
     for legs in legs_by_shipment.values():
         for leg in legs:
             leg.track = tracks.get(leg.leg_id, [])

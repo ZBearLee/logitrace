@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, String, func
+from sqlalchemy import DateTime, Double, Enum, Float, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -33,8 +33,8 @@ class Location(Base):
     type: Mapped[str] = mapped_column(
         Enum("port", "warehouse", "city", name="location_type"), nullable=False
     )
-    lat: Mapped[float] = mapped_column(Float, nullable=False)
-    lng: Mapped[float] = mapped_column(Float, nullable=False)
+    lat: Mapped[float] = mapped_column(Double, nullable=False)
+    lng: Mapped[float] = mapped_column(Double, nullable=False)
     country: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 

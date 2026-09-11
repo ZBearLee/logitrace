@@ -17,7 +17,7 @@ export const routes: AppRoute[] = [
   ...notificationsRoutes,
 ]
 
-// 默认落地到运单列表：大屏页目前是空壳（地图/地球可视化还没接），拿它当首屏会看到一片空白。
+// 默认落地到运单列表。
 export const DEFAULT_ROUTE = '/shipments'
 
 /**

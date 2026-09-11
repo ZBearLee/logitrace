@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, Float, ForeignKey, Index, String, func
+from sqlalchemy import DateTime, Double, Enum, Float, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -49,8 +49,8 @@ class Shipment(Base):
     actual_arrival: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # 冗余最新位置：列表页展示在途运单免 JOIN 轨迹表（读多写少，空间换时间）
-    latest_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
-    latest_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    latest_lat: Mapped[float | None] = mapped_column(Double, nullable=True)
+    latest_lng: Mapped[float | None] = mapped_column(Double, nullable=True)
     latest_ts: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
