@@ -83,9 +83,10 @@ export default function TrendLine({ trend, width = 880, height = 300 }: Props) {
       .attr('stroke', '#f0a020')
       .attr('stroke-dasharray', '4,4')
       .attr('stroke-width', 1)
+    // 标签放虚线下方、右侧运量轴刻度之间的空隙：原来压在轴上，和刻度数字挤在一起
     g.append('text')
-      .attr('x', margin.left + innerW)
-      .attr('y', yRate(TARGET) - 4)
+      .attr('x', margin.left + innerW - 6)
+      .attr('y', yRate(TARGET) + 12)
       .attr('text-anchor', 'end')
       .attr('fill', '#f0a020')
       .attr('font-size', 10)

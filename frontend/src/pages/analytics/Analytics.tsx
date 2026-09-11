@@ -11,6 +11,7 @@ import DelayHistogram from './components/DelayHistogram'
 import CarrierBar from './components/CarrierBar'
 import TrendLine from './components/TrendLine'
 import DelayReasons from './components/DelayReasons'
+import RouteSankey, { ROUTE_MODE_COLOR } from './components/RouteSankey'
 
 const { Title, Text } = Typography
 
@@ -164,6 +165,23 @@ export default function Analytics() {
           <div style={{ display: 'flex', justifyContent: 'center' }}>
             <DelayReasons reasons={data?.delay_reasons ?? []} onSelect={openReason} />
           </div>
+        </Card>
+
+        <Card
+          title="航线流量（起点口岸 → 终点口岸，粗细=运量，颜色=运输方式）"
+          style={{ marginTop: 16 }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'center', overflowX: 'auto' }}>
+            <RouteSankey routes={data?.top_routes ?? []} />
+          </div>
+          <Legend
+            items={[
+              { color: ROUTE_MODE_COLOR.sea, label: '海运' },
+              { color: ROUTE_MODE_COLOR.road, label: '陆运' },
+              { color: ROUTE_MODE_COLOR.air, label: '空运' },
+              { color: ROUTE_MODE_COLOR.rail, label: '铁运' },
+            ]}
+          />
         </Card>
       </Spin>
     </div>

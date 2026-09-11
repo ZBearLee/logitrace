@@ -11,6 +11,11 @@ export interface NetworkNode {
   location_type?: string | null
   country?: string | null
   carrier_mode?: string | null
+  /** location 才有：港口 code，联动大屏高亮用 */
+  code?: string | null
+  /** location 才有：经纬度，联动大屏飞行定位用 */
+  lat?: number | null
+  lng?: number | null
   /** 该节点关联运单的准点率（0-1），无评分样本时为 null */
   on_time_rate?: number | null
   /** 'single_carrier'（口岸只被 1 个承运商服务）/ 'single_port'（承运商只服务 1 个口岸） */
@@ -20,6 +25,15 @@ export interface NetworkNode {
   serves?: number | null
   /** 主要合作方名称（口岸=承运商名 / 承运商=口岸名），按运量降序取前 5 */
   partners?: string[]
+  /** 节点下钻吞吐量：Top 流向口岸，按运量降序取前 5 */
+  top_lanes?: TopLane[]
+}
+
+/** 节点下钻吞吐量的一项：对方口岸名 + 运量（+ 运输方式）。 */
+export interface TopLane {
+  label: string
+  count: number
+  mode?: string | null
 }
 
 export interface NetworkEdge {

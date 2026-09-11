@@ -36,6 +36,14 @@ export interface DelayReason {
   count: number
 }
 
+/** 航线流量（桑基图）：起点口岸 → 终点口岸 的运量，按运输方式着色。 */
+export interface RouteFlow {
+  origin: string
+  dest: string
+  mode: string
+  count: number
+}
+
 export interface AnalyticsSummary {
   total_rated: number
   on_time: number
@@ -46,4 +54,6 @@ export interface AnalyticsSummary {
   /** 时间维度：每日趋势与延误原因拆解，让看板可下钻 */
   trend: TrendPoint[]
   delay_reasons: DelayReason[]
+  /** 空间维度：起点→终点口岸运量 Top N，桑基图看全局货流走向 */
+  top_routes: RouteFlow[]
 }

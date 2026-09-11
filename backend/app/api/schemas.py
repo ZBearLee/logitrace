@@ -288,12 +288,25 @@ class DelayReason(BaseModel):
     count: int = 0
 
 
+class RouteFlow(BaseModel):
+    """航线流量（桑基图数据源）：起点口岸 → 终点口岸 的运量，按运输方式聚合。
+
+    桑基图用 origin/dest 两类口岸作左右列、link 粗细表运量，前端只负责布局不重算。
+    """
+
+    origin: str
+    dest: str
+    mode: str  # sea/road/air/rail，用于给 link 上色
+    count: int = 0
+
+
 class AnalyticsSummary(BaseModel):
-    """运营看板聚合：整体准点率 + 延误分布直方图 + 各承运商对比 + 趋势 + 延误原因。
+    """运营看板聚合：整体准点率 + 延误分布直方图 + 各承运商对比 + 趋势 + 延误原因 + 航线流量。
 
     评分口径统一在后端算：只统计已送达（delivered/delayed）且有计划与实际到达的运单，
     actual_arrival <= planned_arrival 记准时，否则按超出小时数落入延误分箱，前端只画图不重算。
-    trend 按计划到达日期分天；delay_reasons 来自异常记录表，按类型聚合。
+    trend 按计划到达日期分天；delay_reasons 来自异常记录表，按类型聚合；
+    top_routes 是起点→终点口岸的运量 Top N，供桑基图看「货往哪流」。
     """
 
     total_rated: int = 0
@@ -305,6 +318,20 @@ class AnalyticsSummary(BaseModel):
     # 时间维度：趋势折线（按天）与延误原因拆解，让看板从「静态快照」变成可下钻的分析
     trend: list[TrendPoint] = []
     delay_reasons: list[DelayReason] = []
+    # 空间维度：起点→终点口岸的运量 Top N，桑基图看全局货流走向
+    top_routes: list[RouteFlow] = []
+
+
+class TopLane(BaseModel):
+    """节点下钻吞吐量：该节点关联运单按「对方口岸」聚合的 Top 流向。
+
+    口岸节点看 Top 目的港、承运商节点看 Top 服务口岸，让抽屉下钻不止有总量，
+    还能看出「货主要往哪几个点聚」，命中单点依赖风险时尤其有用。
+    """
+
+    label: str  # 对方口岸名
+    count: int = 0
+    mode: str | None = None  # lane 才有运输方式；承运商→口岸聚合后该字段为 None
 
 
 class NetworkNode(BaseModel):
@@ -323,12 +350,16 @@ class NetworkNode(BaseModel):
     location_type: str | None = None  # location 才有：port/warehouse/city
     country: str | None = None
     carrier_mode: str | None = None  # carrier 才有：sea/road/air/rail
+    code: str | None = None  # location 才有：港口 code，前端联动大屏高亮用
+    lat: float | None = None  # location 才有：经纬度，前端联动大屏飞行定位用
+    lng: float | None = None
     # 洞察字段
     on_time_rate: float | None = None  # 该节点关联运单的准点率（0-1），无评分样本时为 None
     risk: str | None = None  # 'single_carrier'（口岸只被 1 个承运商服务）/ 'single_port'（承运商只服务 1 个口岸）
     served_by: int | None = None  # location：服务它的不同承运商数
     serves: int | None = None  # carrier：它服务的不同口岸数
     partners: list[str] = []  # 主要合作方名称（口岸=承运商名 / 承运商=口岸名），按运量降序取前 5
+    top_lanes: list[TopLane] = []  # 节点下钻吞吐量：Top 流向口岸，按运量降序取前 5
 
 
 class NetworkEdge(BaseModel):

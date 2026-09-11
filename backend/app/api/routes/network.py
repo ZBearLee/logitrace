@@ -9,7 +9,7 @@ from collections import defaultdict
 from fastapi import APIRouter
 from sqlalchemy import select
 
-from app.api.schemas import NetworkEdge, NetworkGraph, NetworkNode
+from app.api.schemas import NetworkEdge, NetworkGraph, NetworkNode, TopLane
 from app.db.models.reference import Carrier, Location
 from app.db.models.shipment import Shipment
 from app.db.session import SessionDep
@@ -92,6 +92,35 @@ async def network_graph(session: SessionDep) -> NetworkGraph:
         pairs = sorted(counter.get(key, {}).items(), key=lambda kv: kv[1], reverse=True)[:5]
         return [name_of[i].name for i, _ in pairs if i in name_of]
 
+    # 节点下钻吞吐量：口岸看 Top 目的港、承运商看 Top 服务口岸，按运量降序取前 5。
+    # 直接从已聚合的 lane_counter / car_loc_cnt 派生，不二次扫全表。
+    loc_dest: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for (o, d, _m), c in lane_counter.items():
+        if o is not None and d is not None:
+            loc_dest[o][d] += c
+    loc_top: dict[int, list[TopLane]] = {}
+    for loc_id, dests in loc_dest.items():
+        loc_top[loc_id] = [
+            TopLane(label=locations[d].name, count=c)
+            for d, c in sorted(dests.items(), key=lambda kv: kv[1], reverse=True)[:5]
+            if d in locations
+        ]
+    car_top: dict[int, list[TopLane]] = {}
+    # car_loc_cnt 是 (承运商, 口岸)->运量 的扁平计数，先按承运商聚成嵌套再取 Top 5
+    car_ports: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for (cid, lid), c in car_loc_cnt.items():
+        car_ports[cid][lid] += c
+    for car_id, ports in car_ports.items():
+        car_top[car_id] = [
+            TopLane(
+                label=locations[p].name,
+                count=c,
+                mode=carriers[car_id].mode if car_id in carriers else None,
+            )
+            for p, c in sorted(ports.items(), key=lambda kv: kv[1], reverse=True)[:5]
+            if p in locations
+        ]
+
     nodes: list[NetworkNode] = []
     for loc_id, vol in loc_volume.items():
         loc = locations.get(loc_id)
@@ -107,10 +136,14 @@ async def network_graph(session: SessionDep) -> NetworkGraph:
                 volume=vol,
                 location_type=loc.type,
                 country=loc.country,
+                code=loc.code,
+                lat=loc.lat,
+                lng=loc.lng,
                 on_time_rate=round(to / tr, 4) if tr else None,
                 risk="single_carrier" if served_by == 1 else None,
                 served_by=served_by,
                 partners=top_partners(loc_car_cnt, loc_id, carriers),
+                top_lanes=loc_top.get(loc_id, []),
             )
         )
     for car_id, vol in car_volume.items():
@@ -130,6 +163,7 @@ async def network_graph(session: SessionDep) -> NetworkGraph:
                 risk="single_port" if serves == 1 else None,
                 serves=serves,
                 partners=top_partners(car_loc_cnt, car_id, locations),
+                top_lanes=car_top.get(car_id, []),
             )
         )
 

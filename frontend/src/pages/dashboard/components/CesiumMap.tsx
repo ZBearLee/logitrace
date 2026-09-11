@@ -6,6 +6,7 @@ import { useWorldGeo } from '@/pages/shipments/components/worldGeo'
 import { connectPositions } from '@/api/ws'
 import { statusLabel } from '@/constants/shipments'
 import type { MapOverview } from '@/types/shipments'
+import { linkage, type LinkageRequest } from '@/store/linkage'
 
 /** 初始视角：东经 105 / 北纬 20 上空 2400 万米，一屏俯瞰全球主要航线。 */
 const HOME_LNG = 105
@@ -145,6 +146,10 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
   // 多票跑在同一条航线上时线会完全重叠，聚焦是唯一能把它们分开看的手段。
   const [focusId, setFocusId] = useState<number | null>(null)
   const [shipQuery, setShipQuery] = useState('')
+  // 跨页联动高亮：网络页框选/点选的口岸 code 集合，命中则在地球上用金色大点强调。
+  const [highlightCodes, setHighlightCodes] = useState<Set<string>>(() => new Set())
+  // 最近一次联动请求：viewer 可能晚于请求到达，先存这里，等 viewer 建好再飞行。
+  const pendingLinkRef = useRef<LinkageRequest | null>(null)
 
   // 实时 / 历史回放两种模式：回放由 Cesium Clock 驱动，实时走 WS 增量。
   const [mode, setMode] = useState<'live' | 'replay'>('live')
@@ -155,6 +160,43 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
   useEffect(() => {
     modeRef.current = mode
   }, [mode])
+
+  /**
+   * 联动飞行：把镜头飞到网络页指定的口岸（单点）或框选口岸的包围盒（多点）。
+   * 失败兜底：viewer 未就绪时直接返回，调用方会在 viewer 建好后重放 pendingLinkRef。
+   */
+  const flyTo = (r: LinkageRequest) => {
+    const viewer = viewerRef.current
+    if (viewer == null) return
+    if (r.kind === 'flyToPort') {
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(r.point.lng, r.point.lat, 900_000),
+        duration: 1.2,
+      })
+    } else {
+      const pts = r.points.map((p) => Cesium.Cartesian3.fromDegrees(p.lng, p.lat))
+      if (pts.length === 0) return
+      const sphere = Cesium.BoundingSphere.fromPoints(pts)
+      viewer.camera.flyToBoundingSphere(sphere, {
+        offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, Math.max(sphere.radius * 4, 200_000)),
+        duration: 1.2,
+      })
+    }
+  }
+
+  // 跨页联动：网络页发出的「飞行定位/高亮」请求在此消费。模块级单例在切页后存活，
+  // 大屏挂载时取一次即可；若请求先于 viewer 就绪到达，先存 pendingLinkRef，等 viewer 建好再飞。
+  useEffect(() => {
+    const take = () => {
+      const r = linkage.consume()
+      if (r == null) return
+      pendingLinkRef.current = r
+      setHighlightCodes(new Set(r.kind === 'flyToPort' ? [r.code] : r.codes))
+      flyTo(r)
+    }
+    take()
+    return linkage.subscribe(take)
+  }, [])
 
   useEffect(() => {
     const container = containerRef.current
@@ -292,6 +334,10 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     viewer.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(HOME_LNG, HOME_LAT, HOME_HEIGHT),
     })
+
+    // 跨页联动：网络页的飞行请求可能在 viewer 就绪前就到达，放在 setView 之后补放。
+    // 顺序很关键——setView 是瞬移，写在它之前会被初始视角立刻覆盖、飞行动画被打断。
+    if (pendingLinkRef.current) flyTo(pendingLinkRef.current)
 
     return () => {
       handler.destroy()
@@ -473,16 +519,24 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
       }
     }
 
-    // 地点标注：小点 + code 文字
+    // 地点标注：小点 + code 文字；被网络页联动选中的口岸用金色大点强调
     for (const port of data.ports) {
+      const hot = highlightCodes.has(port.code)
       ds.entities.add({
         id: `${ID_PORT}${port.code}`,
         position: Cesium.Cartesian3.fromDegrees(port.lng, port.lat, PORT_HEIGHT),
-        point: { pixelSize: 4, color: Cesium.Color.fromCssColorString(PORT_COLOR) },
+        point: {
+          pixelSize: hot ? 8 : 4,
+          color: hot
+            ? Cesium.Color.fromCssColorString('#ffd666')
+            : Cesium.Color.fromCssColorString(PORT_COLOR),
+          outlineWidth: hot ? 2 : 0,
+          outlineColor: hot ? Cesium.Color.fromCssColorString('#fff3c4') : undefined,
+        },
         label: {
           text: port.code,
           font: '11px sans-serif',
-          fillColor: Cesium.Color.fromCssColorString('#c9d7e8'),
+          fillColor: Cesium.Color.fromCssColorString(hot ? '#ffe7a0' : '#c9d7e8'),
           pixelOffset: new Cesium.Cartesian2(0, -10),
           // 文字只在拉近后显示：全球视角下几十个 code 全渲染会挤成一团
           distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 12_000_000),
@@ -522,7 +576,7 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         }
       }
     }
-  }, [data, statusFilter, focusId, mode])
+  }, [data, statusFilter, focusId, mode, highlightCodes])
 
   /**
    * 实时轨迹层：订阅位置流 → 累积尾迹 + 移动船位点。
@@ -603,6 +657,9 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
 
   /** 回到初始全球视角：拖动/缩放迷失方向后一键复位。 */
   const resetView = () => {
+    // 复位同时清掉网络页联动留下的口岸高亮，避免残留金色大点误导
+    setHighlightCodes(new Set())
+    pendingLinkRef.current = null
     viewerRef.current?.camera.setView({
       destination: Cesium.Cartesian3.fromDegrees(HOME_LNG, HOME_LAT, HOME_HEIGHT),
     })

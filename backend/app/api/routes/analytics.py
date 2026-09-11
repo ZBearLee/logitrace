@@ -4,13 +4,21 @@
 都在这里算，避免把整张 shipments 表拉回浏览器自己数——样本稍大就是 N+1 + 大体积传输。
 """
 
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
-from app.api.schemas import AnalyticsSummary, CarrierMetric, DelayBucket, DelayReason, TrendPoint
-from app.db.models.reference import Carrier
+from app.api.schemas import (
+    AnalyticsSummary,
+    CarrierMetric,
+    DelayBucket,
+    DelayReason,
+    RouteFlow,
+    TrendPoint,
+)
+from app.db.models.reference import Carrier, Location
 from app.db.models.shipment import Shipment
 from app.db.models.tracking import ExceptionRecord
 from app.db.session import SessionDep
@@ -124,6 +132,30 @@ async def analytics_summary(
         ex_base = ex_base.where(ExceptionRecord.detected_at >= window_start)
     delay_reasons = [DelayReason(type=t, count=c) for t, c in (await session.execute(ex_base)).all()]
 
+    # 航线流量（桑基图）：起点→终点口岸运量 Top N，按运输方式着色。
+    # 单独聚合全量 shipments 的 OD 段（不限评分样本），看「货往哪流」比仅看已送达更全。
+    locations = {loc.id: loc for loc in (await session.execute(select(Location))).scalars()}
+    od_rows = (
+        await session.execute(
+            select(Shipment.origin_id, Shipment.dest_id, Carrier.mode)
+            .join(Carrier, Carrier.id == Shipment.carrier_id, isouter=True)
+            .where(Shipment.origin_id.isnot(None), Shipment.dest_id.isnot(None))
+        )
+    ).all()
+    od_counter: dict[tuple[int, int, str | None], int] = defaultdict(int)
+    for o, d, mode in od_rows:
+        od_counter[(o, d, mode)] += 1
+    top_routes = [
+        RouteFlow(
+            origin=locations[o].name,
+            dest=locations[d].name,
+            mode=mode or "unknown",
+            count=c,
+        )
+        for (o, d, mode), c in sorted(od_counter.items(), key=lambda kv: kv[1], reverse=True)[:30]
+        if o in locations and d in locations
+    ]
+
     return AnalyticsSummary(
         total_rated=total_rated,
         on_time=on_time,
@@ -133,4 +165,5 @@ async def analytics_summary(
         carriers=sorted(carriers.values(), key=lambda c: c.total, reverse=True),
         trend=trend_points,
         delay_reasons=delay_reasons,
+        top_routes=top_routes,
     )

@@ -6,6 +6,7 @@ import { Button, Card, Checkbox, Drawer, Input, Space, Spin, Tag, Typography } f
 import { useNavigate } from 'react-router-dom'
 import { getNetworkGraph } from '@/api/network'
 import type { NetworkGraph, NetworkNode } from '@/types/network'
+import { linkage } from '@/store/linkage'
 import NetworkForce from './components/NetworkForce'
 
 const { Title, Text, Paragraph } = Typography
@@ -76,6 +77,12 @@ export default function Network() {
   const [selected, setSelected] = useState<NetworkNode | null>(null)
   const [modeFilter, setModeFilter] = useState<string[]>(ALL_MODES)
   const [search, setSearch] = useState('')
+  // 框选模式：开启后可在图上拖拽框选口岸；框选结果经联动通道在大屏高亮
+  const [selectionMode, setSelectionMode] = useState(false)
+  const [boxIds, setBoxIds] = useState<string[]>([])
+
+  // 节点索引：抽屉定位、框选高亮都靠它把 id 解成 code/经纬度
+  const nodeById = data ? new Map(data.nodes.map((n) => [n.id, n])) : null
 
   useEffect(() => {
     let alive = true
@@ -118,7 +125,66 @@ export default function Network() {
           value={modeFilter}
           onChange={(vals) => setModeFilter(vals as string[])}
         />
+        <Button
+          type={selectionMode ? 'primary' : 'default'}
+          onClick={() => {
+            setSelectionMode((v) => !v)
+            setBoxIds([])
+          }}
+        >
+          {selectionMode ? '退出框选' : '框选口岸'}
+        </Button>
       </Space>
+
+      {selectionMode && (
+        <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+          在空白处拖拽框选口岸，松手后可一键在大屏高亮这些点。
+        </Text>
+      )}
+
+      {boxIds.length > 0 && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: '10px 14px',
+            background: '#eef4ff',
+            border: '1px solid #bcd3f7',
+            borderRadius: 8,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            flexWrap: 'wrap',
+          }}
+        >
+          <Text>
+            已框选 <Text strong>{boxIds.length}</Text> 个口岸
+          </Text>
+          <Button
+            type="primary"
+            size="small"
+            onClick={() => {
+              const ports = boxIds
+                .map((id) => nodeById?.get(id))
+                .filter(
+                  (n): n is NetworkNode =>
+                    !!n && n.type === 'location' && n.lat != null && n.lng != null && !!n.code,
+                )
+              if (ports.length === 0) return
+              linkage.request({
+                kind: 'flyToBounds',
+                codes: ports.map((p) => p.code as string),
+                points: ports.map((p) => ({ lat: p.lat as number, lng: p.lng as number })),
+              })
+              navigate('/dashboard')
+            }}
+          >
+            在大屏高亮
+          </Button>
+          <Button size="small" onClick={() => setBoxIds([])}>
+            清除
+          </Button>
+        </div>
+      )}
 
       <Spin spinning={loading}>
         <Card style={{ marginTop: 16 }}>
@@ -129,6 +195,8 @@ export default function Network() {
               onSelectNode={setSelected}
               modeFilter={modeFilter}
               search={search}
+              selectionMode={selectionMode}
+              onBoxSelect={setBoxIds}
             />
           </div>
           <Legend />
@@ -184,6 +252,34 @@ export default function Network() {
               </Paragraph>
             )}
 
+            {selected.top_lanes && selected.top_lanes.length > 0 && (
+              <div>
+                <Text type="secondary">
+                  {selected.type === 'location'
+                    ? '主要目的港（运量 Top 5）'
+                    : '主要服务口岸（运量 Top 5）'}
+                </Text>
+                <div style={{ marginTop: 6 }}>
+                  {selected.top_lanes.map((l) => (
+                    <div
+                      key={l.label}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        padding: '3px 0',
+                        borderBottom: '1px solid rgba(5,5,5,0.06)',
+                      }}
+                    >
+                      <span>{l.label}</span>
+                      <span>
+                        <Text strong>{l.count}</Text> 票
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {selected.risk && (
               <Paragraph type="danger" style={{ marginBottom: 0 }}>
                 ⚠ 风险：{RISK_DESC[selected.risk]}
@@ -202,6 +298,26 @@ export default function Network() {
                 </div>
               </div>
             )}
+
+            {selected.type === 'location' &&
+              selected.lat != null &&
+              selected.lng != null &&
+              selected.code && (
+                <Button
+                  block
+                  onClick={() => {
+                    linkage.request({
+                      kind: 'flyToPort',
+                      code: selected.code as string,
+                      label: selected.label,
+                      point: { lat: selected.lat as number, lng: selected.lng as number },
+                    })
+                    navigate('/dashboard')
+                  }}
+                >
+                  在地球定位
+                </Button>
+              )}
 
             {carrierId != null && (
               <Button

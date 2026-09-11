@@ -28,6 +28,10 @@ interface Props {
   modeFilter?: string[]
   /** 搜索关键字，命中节点 label 的高亮，其余淡出。 */
   search?: string
+  /** 框选模式：开启后在空白区拖拽出矩形，松手选中框内口岸（联动大屏高亮）。 */
+  selectionMode?: boolean
+  /** 框选完成时回传选中的节点 id 列表（仅 location 节点）。 */
+  onBoxSelect?: (ids: string[]) => void
   width?: number
   height?: number
 }
@@ -40,11 +44,16 @@ interface SimNode extends SimulationNodeDatum {
   location_type?: string | null
   country?: string | null
   carrier_mode?: string | null
+  /** location 才有：港口 code 与经纬度，联动大屏飞行定位用 */
+  code?: string | null
+  lat?: number | null
+  lng?: number | null
   on_time_rate?: number | null
   risk?: string | null
   served_by?: number | null
   serves?: number | null
   partners?: string[]
+  top_lanes?: { label: string; count: number; mode?: string | null }[]
 }
 
 interface SimLink extends SimulationLinkDatum<SimNode> {
@@ -83,6 +92,8 @@ export default function NetworkForce({
   onSelectNode,
   modeFilter = [],
   search = '',
+  selectionMode = false,
+  onBoxSelect,
   width = 760,
   height = 540,
 }: Props) {
@@ -94,6 +105,13 @@ export default function NetworkForce({
   const adjRef = useRef<Map<string, Set<string>>>(new Map())
   const onSelectRef = useRef(onSelectNode)
   onSelectRef.current = onSelectNode
+  // 框选 / 联动：用 ref 桥接，避免切换框选模式就重排布局
+  const selectionModeRef = useRef(selectionMode)
+  selectionModeRef.current = selectionMode
+  const onBoxSelectRef = useRef(onBoxSelect)
+  onBoxSelectRef.current = onBoxSelect
+  // 当前缩放变换：框选松手时把屏幕矩形反算回图坐标，判断哪些口岸被框中
+  const transformRef = useRef<{ x: number; y: number; k: number }>({ x: 0, y: 0, k: 1 })
 
   // 主 effect：结构变化（数据/尺寸/运输方式筛选）时重建布局
   useEffect(() => {
@@ -213,10 +231,71 @@ export default function NetworkForce({
 
     const zoomBehavior = zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.2, 4])
+      // 框选模式下禁用拖拽平移（拖拽留给框选用），滚轮缩放照常
+      .filter((event: Event) => {
+        if (event.type === 'wheel') return true
+        if (selectionModeRef.current) return false
+        return !(event as MouseEvent).button
+      })
       .on('zoom', (event) => {
         container.attr('transform', event.transform.toString())
+        transformRef.current = { x: event.transform.x, y: event.transform.y, k: event.transform.k }
       })
     svg.call(zoomBehavior)
+
+    // 框选（仅 selectionMode）：空白区拖拽出矩形，松手选中框内口岸 → 回调父组件去大屏高亮
+    svg.on('mousedown.boxselect', (event: MouseEvent) => {
+      if (!selectionModeRef.current) return
+      // 只在 svg 空白背景起框，命中节点 g 的不算，避免误框
+      if ((event.target as Element).tagName !== 'svg') return
+      event.preventDefault()
+      const start = [event.offsetX, event.offsetY]
+      let last = [...start] as [number, number]
+      const rect = svg
+        .append('rect')
+        .attr('fill', '#2f81f7')
+        .attr('fill-opacity', 0.12)
+        .attr('stroke', '#2f81f7')
+        .attr('stroke-dasharray', '3,3')
+        .attr('pointer-events', 'none')
+      const move = (ev: MouseEvent) => {
+        last = [ev.offsetX, ev.offsetY]
+        rect
+          .attr('x', Math.min(start[0], ev.offsetX))
+          .attr('y', Math.min(start[1], ev.offsetY))
+          .attr('width', Math.abs(ev.offsetX - start[0]))
+          .attr('height', Math.abs(ev.offsetY - start[1]))
+      }
+      const up = () => {
+        svg.on('mousemove.boxselect', null)
+        svg.on('mouseup.boxselect', null)
+        rect.remove()
+        const w = Math.abs(last[0] - start[0])
+        const h = Math.abs(last[1] - start[1])
+        // 仅有微小位移视为单击（交给背景点选取消选中），不算框选
+        if (w < 4 && h < 4) return
+        const t = transformRef.current
+        const gx0 = (Math.min(start[0], last[0]) - t.x) / t.k
+        const gx1 = (Math.max(start[0], last[0]) - t.x) / t.k
+        const gy0 = (Math.min(start[1], last[1]) - t.y) / t.k
+        const gy1 = (Math.max(start[1], last[1]) - t.y) / t.k
+        const ids = nodesRef.current
+          .filter(
+            (n) =>
+              n.type === 'location' &&
+              n.x != null &&
+              n.y != null &&
+              n.x >= gx0 &&
+              n.x <= gx1 &&
+              n.y >= gy0 &&
+              n.y <= gy1,
+          )
+          .map((n) => n.id)
+        onBoxSelectRef.current?.(ids)
+      }
+      svg.on('mousemove.boxselect', move)
+      svg.on('mouseup.boxselect', up)
+    })
 
     // 背景点击取消选中
     svg.on('click', () => onSelectRef.current?.(null))
