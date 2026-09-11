@@ -276,3 +276,40 @@ class AnalyticsSummary(BaseModel):
     on_time_rate: float = 0
     delay_buckets: list[DelayBucket] = []
     carriers: list[CarrierMetric] = []
+
+
+class NetworkNode(BaseModel):
+    """网络拓扑的一个节点：口岸（location）或承运商（carrier）。
+
+    id 带前缀（loc-/car-）避免两类主键都从 1 开始而撞 id。
+    volume 是该节点关联的运单总数，用于决定节点大小。
+    """
+
+    id: str
+    label: str
+    type: str  # 'location' | 'carrier'
+    volume: int = 0
+    location_type: str | None = None  # location 才有：port/warehouse/city
+    country: str | None = None
+    carrier_mode: str | None = None  # carrier 才有：sea/road/air/rail
+
+
+class NetworkEdge(BaseModel):
+    """网络拓扑的一条边。
+
+    lane：口岸→口岸 的航线，按 (起点,终点,运输方式) 聚合运单数，mode 上色。
+    serve：承运商→口岸 的服务关系，承运商在某票货里以该口岸为起点或终点即计一次。
+    """
+
+    source: str
+    target: str
+    type: str  # 'lane' | 'serve'
+    weight: int = 0
+    mode: str | None = None
+
+
+class NetworkGraph(BaseModel):
+    """物流关系网络：口岸/承运商为节点，航线/服务为边，供前端力导向图一次性渲染。"""
+
+    nodes: list[NetworkNode] = []
+    edges: list[NetworkEdge] = []
