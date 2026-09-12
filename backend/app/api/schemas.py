@@ -443,21 +443,6 @@ class WarehouseLayout(BaseModel):
     flows: list[WarehouseFlow] = []
 
 
-class EtaOut(BaseModel):
-    """运单的最新 ETA 预测：预测到达 + 与计划的偏差 + 置信度。
-
-    deviation_hours 为正代表模型认为会晚到，超阈值（如 24h）前端标红告警。
-    """
-
-    shipment_id: int
-    predicted_arrival: datetime
-    planned_arrival: datetime | None = None
-    deviation_hours: float | None = None
-    confidence: float = 0
-    model_version: str
-    created_at: datetime
-
-
 class AiStatus(BaseModel):
     """AI 能力开关：前端据此决定渲染还是隐藏入口（无 Key 全降级，CI 不受影响）。"""
 
