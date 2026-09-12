@@ -168,6 +168,10 @@ export interface MapPort {
   name: string
   lat: number
   lng: number
+  /** 地点 id：仓库标注可点击进入 3D 仓库场景（/warehouse/:id） */
+  id: number
+  /** 地点类型 port / warehouse / city：据此判断是否可进 3D 场景 */
+  type: string
 }
 
 /** 大屏地图：航线段，起止经纬度已由后端 join 带出。 */

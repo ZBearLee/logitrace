@@ -9,6 +9,7 @@ from sqlalchemy.orm import aliased
 from app.api.deps import current_user
 from app.api.schemas import (
     CarrierOption,
+    EtaOut,
     LegOut,
     MilestoneEventOut,
     PagedShipments,
@@ -16,6 +17,7 @@ from app.api.schemas import (
     ShipmentBrief,
     ShipmentDetail,
 )
+from app.db.models.ai import EtaPrediction
 from app.db.models.reference import Carrier, Location
 from app.db.models.shipment import Leg, Order, Shipment
 from app.db.models.tracking import MilestoneEvent, PositionPoint
@@ -91,6 +93,42 @@ async def list_shipments(
     ]
 
     return PagedShipments(total=total or 0, page=page, page_size=page_size, items=items)
+
+
+@router.get("/{shipment_id}/eta", response_model=EtaOut)
+async def get_shipment_eta(shipment_id: int, session: SessionDep) -> EtaOut:
+    """运单最新 ETA 预测。
+
+    404 = 该运单没有预测（不在途 / 模型未训练），前端据此隐藏 ETA 卡片而不是报错。
+    """
+    pred = (
+        await session.execute(
+            select(EtaPrediction)
+            .where(EtaPrediction.shipment_id == shipment_id)
+            .order_by(EtaPrediction.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if pred is None:
+        raise HTTPException(status_code=404, detail="暂无 ETA 预测")
+
+    planned = (
+        await session.execute(
+            select(Shipment.planned_arrival).where(Shipment.id == shipment_id)
+        )
+    ).scalar_one_or_none()
+    deviation = (
+        (pred.predicted_arrival - planned).total_seconds() / 3600 if planned is not None else None
+    )
+    return EtaOut(
+        shipment_id=shipment_id,
+        predicted_arrival=pred.predicted_arrival,
+        planned_arrival=planned,
+        deviation_hours=round(deviation, 1) if deviation is not None else None,
+        confidence=pred.confidence,
+        model_version=pred.model_version,
+        created_at=pred.created_at,
+    )
 
 
 @router.get("/{shipment_id}", response_model=ShipmentDetail)

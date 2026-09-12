@@ -300,15 +300,17 @@ export default function NetworkForce({
     // 背景点击取消选中
     svg.on('click', () => onSelectRef.current?.(null))
 
+    // 画布越大，斥力/连线长度按面积开方放大，让节点铺开、别都挤在中心
+    const spread = Math.min(1.6, Math.max(1, Math.sqrt((width * height) / (760 * 540))))
     sim = forceSimulation<SimNode>(nodes)
       .force(
         'link',
         forceLink<SimNode, SimLink>(links)
           .id((d) => d.id)
-          .distance((l) => (l.type === 'lane' ? 110 : 70))
+          .distance((l) => (l.type === 'lane' ? 110 : 70) * spread)
           .strength(0.25),
       )
-      .force('charge', forceManyBody().strength(-220))
+      .force('charge', forceManyBody().strength(-220 * spread))
       .force('center', forceCenter(width / 2, height / 2))
       .force(
         'collide',

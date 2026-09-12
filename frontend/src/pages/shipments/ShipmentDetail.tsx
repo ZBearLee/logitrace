@@ -1,6 +1,7 @@
 // 运单详情页：展示单票运单的基本信息、运输链路与里程碑事件。
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Alert,
   Button,
   Card,
   Descriptions,
@@ -15,6 +16,7 @@ import {
 import { ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate, useParams } from 'react-router-dom'
 import { getShipmentDetail, getShipmentEvents, getShipmentPositions } from '@/api/shipments'
+import { getEta } from '@/api/ai'
 import { connectPositions } from '@/api/ws'
 import type { PositionPointOut } from '@/types/shipments'
 import AMapMap from '@/pages/shipments/components/AMapMap'
@@ -50,6 +52,9 @@ export default function ShipmentDetail() {
     loading: positionsLoading,
     error: positionsError,
   } = useAsyncResource(() => getShipmentPositions(shipmentId), [shipmentId])
+
+  // ETA 预测：模型对在途运单批量推理的产物，详情页用「预测到达」替代原计划到达基线
+  const { data: eta, error: etaError } = useAsyncResource(() => getEta(shipmentId), [shipmentId])
 
   // 实时位置：REST 给历史快照，WS 给增量，二者拼成地图要的连续轨迹。
   // 实时点按 leg 归属；leg id 全局唯一，切换运单后旧条目不会被 displayPositions
@@ -153,20 +158,47 @@ export default function ShipmentDetail() {
                 { key: 'pd', label: '计划出发', children: fmt(detail.planned_departure) },
                 {
                   key: 'pa',
-                  // 现在还没有 ETA 预测模型，用计划到达充当 ETA 基线，
-                  // 悬浮说明它的来源，避免被当成「系统算出来的预测值」
                   label: (
-                    <Tooltip title="当前以计划到达作为 ETA 基线，后期接入预测模型后换成模型输出">
+                    <Tooltip title="承运商原计划到达时间（与实际到达对比可看准点率）">
                       <span style={{ borderBottom: '1px dashed #bfbfbf' }}>计划到达</span>
                     </Tooltip>
                   ),
                   children: fmt(detail.planned_arrival),
+                },
+                {
+                  key: 'eta',
+                  // ETA 模型对在途运单批量推理的产物：相对计划到达的偏差超 24h 触发延误预警
+                  label: (
+                    <Tooltip title="ETA 模型预测到达时间；相对计划到达的偏差超 24h 会触发延误预警">
+                      <span style={{ borderBottom: '1px dashed #bfbfbf' }}>预测到达 (ETA)</span>
+                    </Tooltip>
+                  ),
+                  children: eta ? (
+                    <Space size={6}>
+                      {fmt(eta.predicted_arrival)}
+                      <Tag color="blue">{`置信度 ${Math.round(eta.confidence * 100)}%`}</Tag>
+                    </Space>
+                  ) : (
+                    <Tooltip title={etaError != null ? 'ETA 模型未训练或运单不在途' : '加载中'}>
+                      <Typography.Text type="secondary">—</Typography.Text>
+                    </Tooltip>
+                  ),
                 },
                 { key: 'ad', label: '实际出发', children: fmt(detail.actual_departure) },
                 { key: 'aa', label: '实际到达', children: fmt(detail.actual_arrival) },
               ]}
             />
           </Card>
+
+          {eta && eta.deviation_hours != null && eta.deviation_hours > 24 && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginTop: 16 }}
+              message={`预测到达比计划晚约 ${Math.round(eta.deviation_hours)} 小时，已触发延误预警`}
+              description={`模型版本 ${eta.model_version} · 置信度 ${Math.round(eta.confidence * 100)}%`}
+            />
+          )}
 
           <Card title="运输链路">
             {detail.legs.length === 0 ? (

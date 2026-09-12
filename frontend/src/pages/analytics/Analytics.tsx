@@ -1,8 +1,9 @@
-// 运营分析看板（V2.1 D3 看板）：准点率环图 + 延误分布直方图 + 承运商对比堆叠条图 + 准点率趋势 + 延误原因。
+// 运营分析看板：准点率环图 + 延误分布直方图 + 承运商对比堆叠条图 + 准点率趋势 + 延误原因。
 // 三张基础图由后端 /analytics/summary 一次性喂数据，纯 D3 手写 SVG。
 // 让看板「活起来」：时间范围可切；趋势/原因按天聚合；点承运商下钻到运单列表、点延误区间/原因下钻到对应页面。
 import { useEffect, useState } from 'react'
-import { Card, Col, Row, Segmented, Spin, Statistic, Typography } from 'antd'
+import { Alert, Card, Col, Row, Segmented, Space, Spin, Statistic, Tooltip, Typography } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getAnalyticsSummary } from '@/api/analytics'
 import type { AnalyticsSummary } from '@/types/analytics'
@@ -13,7 +14,7 @@ import TrendLine from './components/TrendLine'
 import DelayReasons from './components/DelayReasons'
 import RouteSankey, { ROUTE_MODE_COLOR } from './components/RouteSankey'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 type RangeKey = 'all' | 7 | 30 | 90
 
@@ -37,16 +38,22 @@ export default function Analytics() {
   const [data, setData] = useState<AnalyticsSummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [range, setRange] = useState<RangeKey>('all')
+  // 接口失败要显式提示：静默吞错会让「接口 500」和「真的没数据」在页面上长得一模一样，
+  // 排障时只能靠抓包区分（历史线上两次故障都栽在这）。
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let alive = true
     // loading 初始即为 true，这里不必再 setLoading(true)，避免 effect 内同步 setState 触发级联渲染
     getAnalyticsSummary(range === 'all' ? {} : { days: range })
       .then((d) => {
-        if (alive) setData(d)
+        if (alive) {
+          setData(d)
+          setError(null)
+        }
       })
       .catch(() => {
-        /* 静默失败：看板留空，菜单与路由照常 */
+        if (alive) setError('看板数据加载失败，图表可能不是最新的')
       })
       .finally(() => {
         if (alive) setLoading(false)
@@ -64,19 +71,9 @@ export default function Analytics() {
   const openReason = (type: string) => navigate(`/exceptions?type=${type}`)
 
   return (
-    <div style={{ padding: 16 }}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          flexWrap: 'wrap',
-        }}
-      >
-        <Title level={4} style={{ marginTop: 0, marginBottom: 0 }}>
-          运营分析看板
-        </Title>
+    <div style={{ height: '100%', overflow: 'auto' }}>
+      {/* 与其它模块一致：首行只放筛选条，页面标题交给顶部面包屑；说明收进「?」 */}
+      <Space align="center" size={8}>
         <Segmented<RangeKey>
           value={range}
           onChange={setRange}
@@ -87,11 +84,12 @@ export default function Analytics() {
             { label: '近 7 天', value: 7 },
           ]}
         />
-      </div>
-      <Text type="secondary">
-        跨境运单准点表现与延误分布。可切时间范围；点承运商柱体 / 延误区间 /
-        延误原因可下钻到对应运单或异常。
-      </Text>
+        <Tooltip title="跨境运单准点表现与延误分布。可切时间范围；点承运商柱体 / 延误区间 / 延误原因可下钻到对应运单或异常。">
+          <QuestionCircleOutlined style={{ color: '#8aa4c0', cursor: 'help' }} />
+        </Tooltip>
+      </Space>
+
+      {error != null && <Alert type="warning" showIcon message={error} style={{ marginTop: 12 }} />}
 
       <Spin spinning={loading}>
         <Row gutter={[16, 16]} style={{ marginTop: 16 }}>

@@ -1,8 +1,12 @@
-import { Select, Space, Table, Tag, Typography } from 'antd'
+import { Alert, Divider, Select, Skeleton, Space, Table, Tag, Tooltip, Typography } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { TableProps } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { getEvents } from '@/api/shipments'
+import { getDailyReport } from '@/api/ai'
 import type { EventOut } from '@/types/shipments'
+import type { DailyReportOut } from '@/types/ai'
+import { useAsyncResource } from '@/hooks/useAsyncResource'
 import { usePagedResource } from '@/hooks/usePagedResource'
 import ErrorState from '@/components/feedback/ErrorState'
 
@@ -27,6 +31,13 @@ const STATUS_COLOR: Record<string, string> = {
 
 const fmt = (s: string | null) => (s ? s.replace('T', ' ').slice(0, 16) : '—')
 
+/** 日报 by_type 异常类型中文标签。 */
+const REPORT_TYPE_LABEL: Record<string, string> = {
+  delay: '延误',
+  stalled: '滞留',
+  route_deviation: '航线偏移',
+}
+
 /** payload_json 是 JSON 字符串，拆出可读字段展示，比裸 JSON 直观。 */
 function renderDetail(detail: string | null) {
   if (!detail) return '—'
@@ -44,6 +55,13 @@ function renderDetail(detail: string | null) {
 
 export default function Notifications() {
   const navigate = useNavigate()
+
+  // 异常日报：每天由调度器生成，前端读表展示；无记录时后端现算
+  const {
+    data: report,
+    loading: reportLoading,
+    error: reportError,
+  } = useAsyncResource<DailyReportOut>(() => getDailyReport(), [])
 
   // 与运单列表一致的列表取数封装：分页/筛选/空值兜底统一收敛，页面零样板。
   const {
@@ -92,7 +110,45 @@ export default function Notifications() {
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size="middle">
-      <Space>
+      {reportError != null && <Alert type="info" showIcon message="异常日报暂不可用" />}
+
+      {/* 日报信息与事件类型筛选同排：去掉日报卡标题栏，避免两行留白 */}
+      <Space wrap size={[8, 8]} align="center">
+        {reportLoading || !report ? (
+          reportError == null && <Skeleton.Input active size="small" style={{ width: 180 }} />
+        ) : (
+          <>
+            <Typography.Text strong>异常日报</Typography.Text>
+            <Tag>{report.report_date}</Tag>
+            <Tag color={report.source === 'llm' ? 'purple' : 'default'}>
+              {report.source === 'llm' ? 'AI 生成' : '模板'}
+            </Tag>
+            <Tag color="red">{`当日异常 ${report.stats.total} 起`}</Tag>
+            {Object.entries(report.stats.by_type).map(([t, c]) => (
+              <Tag key={t}>{`${REPORT_TYPE_LABEL[t] ?? t} ${c}`}</Tag>
+            ))}
+            <Tooltip
+              title={
+                <div style={{ maxWidth: 420 }}>
+                  <div>{report.summary}</div>
+                  {report.stats.top_delayed.length > 0 && (
+                    <div style={{ marginTop: 6 }}>
+                      <div>延误最重：</div>
+                      {report.stats.top_delayed.map((d) => (
+                        <div key={d.shipment_no}>
+                          {`${d.shipment_no}（${d.origin}→${d.dest}，超计划 ${Math.round(d.delay_hours)}h）`}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              }
+            >
+              <QuestionCircleOutlined style={{ color: '#8aa4c0', cursor: 'help' }} />
+            </Tooltip>
+            <Divider type="vertical" />
+          </>
+        )}
         <span>事件类型</span>
         <Select
           allowClear
@@ -115,10 +171,8 @@ export default function Notifications() {
         loading={loading}
         rowKey="id"
         columns={columns}
-        // 与运单列表完全相同的结构与算法：筛选行(32) + Space 间距(16) + Header(48)
-        // + Content 外边距(32) + 表头与分页(112) = 240px；表体填满内容区，分页器落在底部。
-        // 之前这两页套了一层 Card，多出的标题栏/内边距只能靠估，估了两次都偏高。
-        scroll={{ y: 'calc(100vh - 240px)' }}
+        // 日报与筛选已合并成一行，表体高度按运单列表口径 + 一行日报的高度计算。
+        scroll={{ y: 'calc(100vh - 270px)' }}
         locale={
           error != null
             ? { emptyText: <ErrorState error={error} scope="list" entity="事件" /> }

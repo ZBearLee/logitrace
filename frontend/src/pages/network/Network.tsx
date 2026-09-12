@@ -1,15 +1,16 @@
-// 物流关系网络（V2.1 D3 力导向）：口岸↔口岸航线 + 承运商服务口岸，后端一次聚合，D3 手写布局。
+// 物流关系网络：口岸↔口岸航线 + 承运商服务口岸，后端一次聚合，D3 手写布局。
 // 让图「活起来」：点节点出右侧详情抽屉（准点率 / 依赖风险 / 合作方）；风险节点自动标红；
 // 按运输方式筛选航线、搜索高亮节点、选中后聚焦其邻居（其余淡出）。
-import { useEffect, useState } from 'react'
-import { Button, Card, Checkbox, Drawer, Input, Space, Spin, Tag, Typography } from 'antd'
+import { useEffect, useRef, useState } from 'react'
+import { Alert, Button, Card, Checkbox, Drawer, Input, Space, Spin, Tag, Tooltip, Typography } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { getNetworkGraph } from '@/api/network'
 import type { NetworkGraph, NetworkNode } from '@/types/network'
 import { linkage } from '@/store/linkage'
 import NetworkForce from './components/NetworkForce'
 
-const { Title, Text, Paragraph } = Typography
+const { Text, Paragraph } = Typography
 
 const MODE_COLOR: Record<string, string> = {
   sea: '#2f81f7',
@@ -80,18 +81,40 @@ export default function Network() {
   // 框选模式：开启后可在图上拖拽框选口岸；框选结果经联动通道在大屏高亮
   const [selectionMode, setSelectionMode] = useState(false)
   const [boxIds, setBoxIds] = useState<string[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   // 节点索引：抽屉定位、框选高亮都靠它把 id 解成 code/经纬度
   const nodeById = data ? new Map(data.nodes.map((n) => [n.id, n])) : null
+
+  // 图谱容器尺寸：跟随卡片实际宽高，避免固定 760 宽在宽屏上两侧留白
+  const chartRef = useRef<HTMLDivElement | null>(null)
+  const [chartSize, setChartSize] = useState({ width: 760, height: 540 })
+  useEffect(() => {
+    const el = chartRef.current
+    if (el == null) return
+    const update = () => {
+      const width = el.clientWidth
+      const height = el.clientHeight
+      setChartSize((s) => (s.width === width && s.height === height ? s : { width, height }))
+    }
+    update()
+    const ro = new ResizeObserver(update)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
   useEffect(() => {
     let alive = true
     getNetworkGraph()
       .then((d) => {
-        if (alive) setData(d)
+        if (alive) {
+          setData(d)
+          setError(null)
+        }
       })
       .catch(() => {
-        /* 静默失败：网络留空 */
+        // 显式提示：静默吞错会让「接口 500」和「真的没数据」在页面上无法区分
+        if (alive) setError('网络数据加载失败，拓扑可能不是最新的')
       })
       .finally(() => {
         if (alive) setLoading(false)
@@ -104,15 +127,9 @@ export default function Network() {
   const carrierId = selected?.type === 'carrier' ? Number(selected.id.slice(4)) : null
 
   return (
-    <div style={{ padding: 16 }}>
-      <Title level={4} style={{ marginTop: 0 }}>
-        物流关系网络
-      </Title>
-      <Text type="secondary">
-        口岸与承运商的关系拓扑：航线按运输方式着色，节点大小随运单量变化。点节点看详情、拖拽节点、滚轮缩放。
-      </Text>
-
-      <Space wrap style={{ marginTop: 12 }}>
+    <div style={{ height: '100%', overflow: 'auto' }}>
+      {/* 与其它模块一致：首行只放筛选控件，页面标题交给顶部面包屑；说明收进「?」 */}
+      <Space wrap align="center" size={[12, 8]}>
         <Input.Search
           allowClear
           placeholder="搜索口岸 / 承运商"
@@ -134,7 +151,12 @@ export default function Network() {
         >
           {selectionMode ? '退出框选' : '框选口岸'}
         </Button>
+        <Tooltip title="口岸与承运商的关系拓扑：航线按运输方式着色，节点大小随运单量变化。点节点看详情、拖拽节点、滚轮缩放。">
+          <QuestionCircleOutlined style={{ color: '#8aa4c0', cursor: 'help' }} />
+        </Tooltip>
       </Space>
+
+      {error != null && <Alert type="warning" showIcon message={error} style={{ marginTop: 8 }} />}
 
       {selectionMode && (
         <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
@@ -187,8 +209,12 @@ export default function Network() {
       )}
 
       <Spin spinning={loading}>
-        <Card style={{ marginTop: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'center', overflowX: 'auto' }}>
+        <Card style={{ marginTop: 12 }} bodyStyle={{ padding: 12 }}>
+          {/* 容器撑满卡片宽高：图谱随可用空间铺开，减少两侧与上下留白 */}
+          <div
+            ref={chartRef}
+            style={{ width: '100%', height: 'calc(100vh - 200px)', minHeight: 420 }}
+          >
             <NetworkForce
               data={data ?? { nodes: [], edges: [] }}
               selectedId={selected?.id ?? null}
@@ -197,6 +223,8 @@ export default function Network() {
               search={search}
               selectionMode={selectionMode}
               onBoxSelect={setBoxIds}
+              width={chartSize.width}
+              height={chartSize.height}
             />
           </div>
           <Legend />

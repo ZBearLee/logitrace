@@ -17,6 +17,8 @@ const HOME_HEIGHT = 24_000_000
 const GLOBE_COLOR = '#0b1f33'
 const LAND_FILL = '#1a3a5f'
 const PORT_COLOR = '#8ab4dd'
+/** 仓库地点色：与 Three.js 场景的作业色同系，暗示「这里能进 3D 场景」 */
+const WAREHOUSE_COLOR = '#3fd0c9'
 
 /**
  * 数据层悬浮高度：航线/船位只需抬离地表一点点。
@@ -81,6 +83,9 @@ interface InfoCard {
   title: string
   lines: string[]
   shipmentId?: number
+  /** 地点 id 与类型：仓库（warehouse）可点击进入 3D 仓库场景 */
+  portId?: number
+  portType?: string
 }
 
 /** GeoJSON 的 [lng, lat] 环 → Cesium 笛卡尔序列。 */
@@ -177,8 +182,11 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
       const pts = r.points.map((p) => Cesium.Cartesian3.fromDegrees(p.lng, p.lat))
       if (pts.length === 0) return
       const sphere = Cesium.BoundingSphere.fromPoints(pts)
+      // 视高按包围球半径放大，但设上限：框选到地理上很远的口岸（如东亚+欧洲）时，
+      // 不设上限会一路退到全球视角，金色高亮点小到看不见，联动就失去了意义。
+      const range = Math.min(Math.max(sphere.radius * 4, 200_000), 12_000_000)
       viewer.camera.flyToBoundingSphere(sphere, {
-        offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, Math.max(sphere.radius * 4, 200_000)),
+        offset: new Cesium.HeadingPitchRange(0, -Math.PI / 2, range),
         duration: 1.2,
       })
     }
@@ -327,7 +335,16 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
       } else if (raw.startsWith(ID_PORT)) {
         const code = raw.slice(ID_PORT.length)
         const port = snapshot.ports.find((p) => p.code === code)
-        if (port) setCard({ kind: 'port', title: port.code, lines: [port.name] })
+        if (port) {
+          setCard({
+            kind: 'port',
+            title: port.code,
+            // 仓库标注额外提示可进 3D 场景，避免用户不知道这里能点进去
+            lines: port.type === 'warehouse' ? [port.name, '仓库（可进入 3D 场景）'] : [port.name],
+            portId: port.id,
+            portType: port.type,
+          })
+        }
       }
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
 
@@ -522,14 +539,16 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     // 地点标注：小点 + code 文字；被网络页联动选中的口岸用金色大点强调
     for (const port of data.ports) {
       const hot = highlightCodes.has(port.code)
+      // 仓库用青色区别于普通港口：它是「可进入 3D 场景」的入口，视觉上要能认出来
+      const base = port.type === 'warehouse' ? WAREHOUSE_COLOR : PORT_COLOR
       ds.entities.add({
         id: `${ID_PORT}${port.code}`,
         position: Cesium.Cartesian3.fromDegrees(port.lng, port.lat, PORT_HEIGHT),
         point: {
-          pixelSize: hot ? 8 : 4,
+          pixelSize: hot ? 8 : port.type === 'warehouse' ? 6 : 4,
           color: hot
             ? Cesium.Color.fromCssColorString('#ffd666')
-            : Cesium.Color.fromCssColorString(PORT_COLOR),
+            : Cesium.Color.fromCssColorString(base),
           outlineWidth: hot ? 2 : 0,
           outlineColor: hot ? Cesium.Color.fromCssColorString('#fff3c4') : undefined,
         },
@@ -1017,6 +1036,25 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
               onClick={() => navigate(`/shipments/${card.shipmentId}`)}
             >
               查看运单详情
+            </button>
+          )}
+          {/* 地球点仓库标注 → 进 Three.js 仓库场景 */}
+          {card.portType === 'warehouse' && card.portId != null && (
+            <button
+              style={{
+                marginTop: 10,
+                width: '100%',
+                cursor: 'pointer',
+                background: '#0e5a57',
+                border: '1px solid #3fd0c9',
+                borderRadius: 4,
+                padding: '6px 0',
+                color: '#d7fffd',
+                fontSize: 12,
+              }}
+              onClick={() => navigate(`/warehouse/${card.portId}`)}
+            >
+              进入仓库 3D 场景
             </button>
           )}
         </div>

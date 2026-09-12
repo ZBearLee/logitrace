@@ -39,6 +39,11 @@ class ShipmentBrief(BaseModel):
     status: str
     origin_code: str | None = None
     dest_code: str | None = None
+    # 起止港经纬度：NL 查数结果可据此直接派发地图联动（flyToBounds 需要坐标）
+    origin_lat: float | None = None
+    origin_lng: float | None = None
+    dest_lat: float | None = None
+    dest_lng: float | None = None
     carrier_name: str | None = None
     planned_departure: datetime | None = None
     planned_arrival: datetime | None = None
@@ -202,6 +207,10 @@ class MapPort(BaseModel):
     name: str
     lat: float
     lng: float
+    # 地点 id 与类型：大屏要区分「可进入 3D 仓库场景」的地点，
+    # 点击仓库标注时用它跳 /warehouse/{id}
+    id: int = 0
+    type: str = "port"  # port / warehouse / city
 
 
 class MapLeg(BaseModel):
@@ -381,3 +390,116 @@ class NetworkGraph(BaseModel):
 
     nodes: list[NetworkNode] = []
     edges: list[NetworkEdge] = []
+
+
+class WarehouseSlot(BaseModel):
+    """仓库库位：对应 Three.js InstancedMesh 的一个实例。
+
+    index 即实例下标，前端按它定位与拾取；status 决定实例颜色。
+    """
+
+    index: int
+    row: int
+    col: int
+    level: int
+    status: str  # 'occupied'（有货）/ 'empty'（空位）/ 'reserved'（预占）
+    shipment_no: str | None = None
+    sku: str | None = None
+
+
+class WarehouseDock(BaseModel):
+    """月台：仓库收发货的出入口，作业动画的起点/终点。"""
+
+    code: str
+    status: str  # 'loading'（装卸中）/ 'idle'（空闲）
+    shipment_no: str | None = None
+
+
+class WarehouseFlow(BaseModel):
+    """在库作业任务：从月台搬运到目标库位，前端据此做「运单在库位间流转」动画。"""
+
+    shipment_no: str
+    from_dock: str
+    to_slot: int
+
+
+class WarehouseLayout(BaseModel):
+    """仓库数字孪生布局：库位 + 月台 + 作业任务，一次返回供 Three.js 场景渲染。
+
+    库位不在域模型 5.1 的表清单里，这里按「仓库 id + 固定种子」确定性生成：
+    同一仓库每次请求布局完全一致，可复现、可点选；接入真实 WMS 时换成库位表即可，
+    前端契约不变。占用率由该仓库的**真实运单量**推导，不是纯随机。
+    """
+
+    id: int
+    code: str
+    name: str
+    rows: int = 0
+    cols: int = 0
+    levels: int = 0
+    occupancy_rate: float = 0
+    slots: list[WarehouseSlot] = []
+    docks: list[WarehouseDock] = []
+    flows: list[WarehouseFlow] = []
+
+
+class EtaOut(BaseModel):
+    """运单的最新 ETA 预测：预测到达 + 与计划的偏差 + 置信度。
+
+    deviation_hours 为正代表模型认为会晚到，超阈值（如 24h）前端标红告警。
+    """
+
+    shipment_id: int
+    predicted_arrival: datetime
+    planned_arrival: datetime | None = None
+    deviation_hours: float | None = None
+    confidence: float = 0
+    model_version: str
+    created_at: datetime
+
+
+class AiStatus(BaseModel):
+    """AI 能力开关：前端据此决定渲染还是隐藏入口（无 Key 全降级，CI 不受影响）。"""
+
+    enabled: bool = False
+    model: str | None = None
+    # ETA 模型产物是否已训练落盘（26 步服务化的前提）
+    eta_ready: bool = False
+
+
+class AiQueryIn(BaseModel):
+    """NL 查数入参：一句自然语言。"""
+
+    question: str
+
+
+class AiQueryOut(BaseModel):
+    """NL 查数结果：解析出的查询参数（透明可审计）+ 命中的运单。"""
+
+    params: dict = {}
+    total: int = 0
+    items: list[ShipmentBrief] = []
+    latency_ms: int = 0
+
+
+class DailyReportOut(BaseModel):
+    """异常日报：摘要 + 结构化统计（前端卡片可自行渲染数字）。"""
+
+    report_date: str
+    summary: str
+    stats: dict = {}
+    source: str  # llm / template
+    created_at: datetime
+
+
+class EtaOut(BaseModel):
+    """单票 ETA 预测：模型给出的到达时间 + 置信度 + 相对计划的偏差（驱动延误预警）。"""
+
+    shipment_id: int
+    predicted_arrival: datetime
+    confidence: float
+    model_version: str
+    features_json: str | None = None
+    # 预测到达 - 计划到达（小时）；正数=偏晚，超过阈值即触发延误预警
+    deviation_hours: float | None = None
+    created_at: datetime

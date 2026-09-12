@@ -121,7 +121,11 @@ async def map_overview(
             leg.track = tracks.get(leg.leg_id, [])
 
     return MapOverview(
-        ports=[MapPort(code=p.code, name=p.name, lat=p.lat, lng=p.lng) for p in locations],
+        # 带上 id 与 type：大屏要区分「可进入 3D 仓库场景」的地点
+        ports=[
+            MapPort(code=p.code, name=p.name, lat=p.lat, lng=p.lng, id=p.id, type=p.type)
+            for p in locations
+        ],
         routes=[
             MapRoute(
                 shipment_id=s.id,

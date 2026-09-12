@@ -1,12 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Button, Layout, Menu, Space, Typography } from 'antd'
-import { LogoutOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import {
+  LogoutOutlined,
+  MacCommandOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
+} from '@ant-design/icons'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { matchRoute, routes } from '@/router'
 import { clearSession, getUser } from '@/utils/auth'
+import { getAiStatus } from '@/api/ai'
 import StatusIndicator from '@/components/StatusIndicator'
 import RouteBreadcrumb from '@/components/RouteBreadcrumb'
 import EventNotifier from '@/components/EventNotifier'
+import CommandPalette from '@/components/CommandPalette'
 
 const { Header, Sider, Content } = Layout
 
@@ -14,6 +21,27 @@ export default function MainLayout() {
   const navigate = useNavigate()
   const { pathname } = useLocation()
   const user = getUser()
+
+  // AI 能力开关：决定命令面板入口是否展示（无 Key 全降级，CI 与离线演示不受影响）
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  useEffect(() => {
+    // oxlint-disable-next-line react/hook-dependencies -- 仅挂载时探一次能力开关，无需进依赖
+    getAiStatus()
+      .then((s) => setAiEnabled(s.enabled))
+      .catch(() => setAiEnabled(false))
+  }, [])
+  useEffect(() => {
+    // 全局 Ctrl/⌘+K 唤起命令面板：与输入框聚焦互不冲突（输入框内也允许唤起）
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault()
+        setPaletteOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   // 当前路由元信息：大屏页让 Sider 默认折叠，给地图让位；数据页默认展开
   // 用 matchRoute 而非 routes.find 精确匹配：详情页 /shipments/12 要命中 /shipments/:id，
@@ -86,6 +114,16 @@ export default function MainLayout() {
             <RouteBreadcrumb />
           </div>
           <Space size={12}>
+            {aiEnabled && (
+              <Button
+                type="text"
+                icon={<MacCommandOutlined />}
+                onClick={() => setPaletteOpen(true)}
+                title="命令面板 (Ctrl+K)"
+              >
+                命令面板
+              </Button>
+            )}
             <StatusIndicator />
             {user && <Typography.Text type="secondary">{user.username}</Typography.Text>}
             <Button
@@ -105,7 +143,7 @@ export default function MainLayout() {
             margin: current?.fullscreen ? 0 : 16,
             padding: current?.fullscreen ? 0 : undefined,
             position: 'relative',
-            // 内容区不滚动：滚动交给表格内部（Table 的 scroll.y），避免内外双滚动条。
+            // 内容区不滚动：滚动交给页面/表格内部，避免内外两层滚动条。
             // minHeight:0 是必需的——flex item 默认 min-height:auto 会被内容撑高，
             // 从而顶破外层 100vh 容器，导致整个页面（连侧边栏和头部）一起滚。
             overflow: 'hidden',
@@ -115,6 +153,11 @@ export default function MainLayout() {
           <Outlet />
         </Content>
       </Layout>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        enabled={aiEnabled}
+      />
     </Layout>
   )
 }
