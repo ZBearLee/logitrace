@@ -7,6 +7,9 @@ requires-python = ">=3.12"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+# migrations 由 alembic 生成：导入顺序/未使用导入是模板产物，改了会被下次
+# revision 重新写回，lint 排除掉（与「生成代码不进 lint」的通行做法一致）
+exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]   # 错误/pyflakes/import排序/警告

@@ -9,7 +9,7 @@ from app.db.base import Base
 
 
 class User(Base):
-    """演示账号：只区分角色，不做复杂权限。"""
+    """示例账号：只区分角色，不做复杂权限。"""
 
     __tablename__ = "users"
 

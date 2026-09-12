@@ -1,7 +1,7 @@
 """物流关系网络：口岸/承运商为节点，航线/服务为边，供前端力导向图渲染。
 
 后端一次性聚合成 nodes/edges，前端只负责画力导向布局，不把 shipments 全表拉回浏览器。
-聚合在 Python 里算（demo 数据量小），避免拼复杂 SQL；返回的图数据本身很小。
+聚合在 Python 里算（当前数据量小），避免拼复杂 SQL；返回的图数据本身很小。
 """
 
 from collections import defaultdict
@@ -88,7 +88,9 @@ async def network_graph(session: SessionDep) -> NetworkGraph:
                 car_rated[carrier_id][0] += 1
                 car_rated[carrier_id][bucket] += 1
 
-    def top_partners(counter: dict[tuple[int, int], int], key: int, name_of: dict[int, object]) -> list[str]:
+    def top_partners(
+        counter: dict[tuple[int, int], int], key: int, name_of: dict[int, object]
+    ) -> list[str]:
         pairs = sorted(counter.get(key, {}).items(), key=lambda kv: kv[1], reverse=True)[:5]
         return [name_of[i].name for i, _ in pairs if i in name_of]
 

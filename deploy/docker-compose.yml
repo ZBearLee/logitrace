@@ -2,7 +2,7 @@
 # ------------------------------------------------------------------
 # 在 deploy/ 目录下执行：
 #
-#   ① 全容器演示（mysql + redis + backend 三容器）
+#   ① 全容器运行（mysql + redis + backend 三容器）
 #      docker compose up -d --build
 #
 #   ② 本地开发（只起中间件，backend 用 venv 跑 --reload）

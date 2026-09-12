@@ -7,7 +7,7 @@
 # 用法：
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 #
-# 需要连容器一起跑时（演示/CI）：
+# 需要连容器一起跑时（联调/CI）：
 #   docker compose --profile full up -d --build
 #
 # 覆盖 backend 的 profile（profile 不可"取消"，所以这里只声明要覆盖的字段）

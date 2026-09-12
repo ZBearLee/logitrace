@@ -1,6 +1,6 @@
 """AI 赋能：ETA 预测记录、AI 查询日志、异常日报。
 
-eta_predictions 带 model_version：便于做「基线 vs 特征工程」的迭代对比（25 步的评估诉求）。
+eta_predictions 带 model_version：便于做「基线 vs 特征工程」的迭代对比。
 ai_query_logs 是可观测性：每次 NL 查数记录解析参数与延迟，主动展示 AI 链路可被审计。
 """
 
@@ -29,7 +29,9 @@ class EtaPrediction(Base):
     confidence: Mapped[float] = mapped_column(Double, nullable=False)
     model_version: Mapped[str] = mapped_column(String(64), nullable=False)
     features_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
 
 
 class AiQueryLog(Base):
@@ -42,7 +44,9 @@ class AiQueryLog(Base):
     parsed_params_json: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     result_count: Mapped[int] = mapped_column(nullable=False, default=0)
     latency_ms: Mapped[int] = mapped_column(nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )
 
 
 class DailyReport(Base):
@@ -57,6 +61,10 @@ class DailyReport(Base):
     stats_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     # 'llm'（模型生成）/ 'template'（无 Key 时的模板降级）
     source: Mapped[str] = mapped_column(
-        Enum("llm", "template", name="daily_report_source"), nullable=False, server_default="template"
+        Enum("llm", "template", name="daily_report_source"),
+        nullable=False,
+        server_default="template",
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, server_default=func.now()
+    )

@@ -250,7 +250,7 @@ def generate(
             # 运输中数据要「行程过半、段程长、到货还在未来」才好看且能观察：
             # 基础 count 里 65% 概率造在途运单（出发在过去 voyage_days 的 15%~80% 处，
             # 进度中段、轨迹连线明显、到货仍在未来数天~数十天），其余造已送达历史运单。
-            # i >= count 的额外段强制在途，用来按需追加在途演示数据。
+            # i >= count 的额外段强制在途，用来按需追加在途样例数据。
             # 不再用「刚出发」那种只到明天、单点轨迹的凑数在途。
             if i >= count:
                 departure = now - timedelta(
@@ -511,7 +511,7 @@ def main() -> None:
         "--extra-in-transit",
         type=int,
         default=0,
-        help="额外强制生成的在途运单数量（演示用，如 20）",
+        help="额外强制生成的在途运单数量（如 20）",
     )
     args = parser.parse_args()
 

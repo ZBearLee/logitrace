@@ -1,4 +1,4 @@
-"""登录接口：校验演示账号并签发访问令牌。"""
+"""登录接口：校验账号口令并签发访问令牌。"""
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select

@@ -364,7 +364,9 @@ class NetworkNode(BaseModel):
     lng: float | None = None
     # 洞察字段
     on_time_rate: float | None = None  # 该节点关联运单的准点率（0-1），无评分样本时为 None
-    risk: str | None = None  # 'single_carrier'（口岸只被 1 个承运商服务）/ 'single_port'（承运商只服务 1 个口岸）
+    risk: str | None = (
+        None  # 'single_carrier'（口岸只被 1 个承运商服务）/ 'single_port'（承运商只服务 1 个口岸）
+    )
     served_by: int | None = None  # location：服务它的不同承运商数
     serves: int | None = None  # carrier：它服务的不同口岸数
     partners: list[str] = []  # 主要合作方名称（口岸=承运商名 / 承运商=口岸名），按运量降序取前 5

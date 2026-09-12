@@ -1,4 +1,4 @@
-"""造短程演示运单：1:1 真实时间下肉眼可见移动。
+"""造短程样例运单：1:1 真实时间下肉眼可见移动。
 
 思路：不扭曲仿真时钟（那是把在途秒成已送达、并引发后续一连串 bug 的根源），
 而是把行程本身缩短到十分钟级别——时钟恒等于真实时间，planned_start/end 语义
@@ -14,9 +14,9 @@ from sqlalchemy import MetaData, Table, create_engine, insert, select, update
 from config import settings
 from main import CUSTOMERS, Seg, build_points, leg_progress
 
-# 演示路线：起终点 code、运输方式、行程分钟数。
+# 短程路线：起终点 code、运输方式、行程分钟数。
 # 选横跨距离大的组合，缩短行程后位移在全球视野下才明显。
-DEMOS: list[tuple[str, str, str, int]] = [
+SHORT_ROUTES: list[tuple[str, str, str, int]] = [
     ("WUSNYC", "WUSLAX", "road", 10),  # 纽约 -> 洛杉矶，10 分钟走完
     ("WDEHAM", "WNLRTM", "road", 30),  # 汉堡 -> 鹿特丹，30 分钟走完
 ]
@@ -28,7 +28,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def make_demo(apply: bool) -> None:
+def make_short_haul(apply: bool) -> None:
     engine = create_engine(settings.mysql_dsn_sync, future=True)
     metadata = MetaData()
     locations_t = Table("locations", metadata, autoload_with=engine)
@@ -53,7 +53,7 @@ def make_demo(apply: bool) -> None:
             return
         carrier_id, road_speed = carrier_row.id, carrier_row.avg_speed
 
-        for o_code, d_code, mode, minutes in DEMOS:
+        for o_code, d_code, mode, minutes in SHORT_ROUTES:
             if o_code not in locs or d_code not in locs:
                 print(f"  跳过 {o_code}->{d_code}：locations 里没有该 code")
                 continue
@@ -63,12 +63,12 @@ def make_demo(apply: bool) -> None:
             start = now
             end = now + timedelta(minutes=minutes)
             stamp = now.strftime("%Y%m%d%H%M%S")
-            shipment_no = f"SHP-DEMO{minutes:02d}-{stamp}"
+            shipment_no = f"SHP-SHORT{minutes:02d}-{stamp}"
 
             if apply:
                 res = conn.execute(
                     insert(orders_t).values(
-                        order_no=f"ORD-DEMO{minutes:02d}-{stamp}",
+                        order_no=f"ORD-SHORT{minutes:02d}-{stamp}",
                         customer_name=random.choice(CUSTOMERS),
                         status="created",
                         created_at=now,
@@ -141,7 +141,7 @@ def make_demo(apply: bool) -> None:
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="造短程演示运单")
+    ap = argparse.ArgumentParser(description="造短程样例运单")
     ap.add_argument("--apply", action="store_true", help="真正写库")
     args = ap.parse_args()
-    make_demo(args.apply)
+    make_short_haul(args.apply)

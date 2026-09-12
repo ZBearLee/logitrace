@@ -22,7 +22,7 @@ export default function MainLayout() {
   const { pathname } = useLocation()
   const user = getUser()
 
-  // AI 能力开关：决定命令面板入口是否展示（无 Key 全降级，CI 与离线演示不受影响）
+  // AI 能力开关：决定命令面板入口是否展示（无 Key 全降级，CI 与离线环境不受影响）
   const [aiEnabled, setAiEnabled] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   useEffect(() => {

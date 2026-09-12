@@ -30,24 +30,21 @@ def main() -> None:
     dest = aliased(Location, name="dest")
 
     with Session(engine) as session:
-        rows = (
-            session.execute(
-                select(
-                    Shipment,
-                    origin.lat,
-                    origin.lng,
-                    dest.lat,
-                    dest.lng,
-                    Carrier.mode,
-                    Carrier.avg_speed,
-                )
-                .join(origin, Shipment.origin_id == origin.id)
-                .join(dest, Shipment.dest_id == dest.id)
-                .join(Carrier, Shipment.carrier_id == Carrier.id)
-                .where(Shipment.status.in_(["delivered", "delayed"]))
+        rows = session.execute(
+            select(
+                Shipment,
+                origin.lat,
+                origin.lng,
+                dest.lat,
+                dest.lng,
+                Carrier.mode,
+                Carrier.avg_speed,
             )
-            .all()
-        )
+            .join(origin, Shipment.origin_id == origin.id)
+            .join(dest, Shipment.dest_id == dest.id)
+            .join(Carrier, Shipment.carrier_id == Carrier.id)
+            .where(Shipment.status.in_(["delivered", "delayed"]))
+        ).all()
 
     dataset = []
     for s, o_lat, o_lng, d_lat, d_lng, mode, avg_speed in rows:

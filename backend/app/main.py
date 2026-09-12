@@ -1,7 +1,7 @@
 """应用入口：创建实例、挂载路由、定时任务。
 
 lifespan 里启动 APScheduler（ETA 每小时批量推理、异常日报每天 08:00），
-并在启动时各先跑一次——否则演示要干等一个小时才有 ETA 数据。
+并在启动时各先跑一次——否则要干等一个小时才有 ETA 数据。
 """
 
 from contextlib import asynccontextmanager

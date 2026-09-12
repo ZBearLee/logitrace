@@ -145,6 +145,7 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
   const lastPosAtRef = useRef<number | null>(null)
 
   const [card, setCard] = useState<InfoCard | null>(null)
+  const [cesiumError, setCesiumError] = useState<string | null>(null)
   // 状态筛选：独立多选，默认只盯在途（控制塔最关心的实时位置）
   const [statusFilter, setStatusFilter] = useState<Set<string>>(() => new Set(['in_transit']))
   // 聚焦运单：选中后地图只画这一票并飞镜头过去。
@@ -210,40 +211,78 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     const container = containerRef.current
     if (container == null) return
 
-    const viewer = new Cesium.Viewer(container, {
-      // 不加载影像瓦片：境外瓦片源在目标网络下均不可用（官方影像要 token、
-      // Carto 要 key、Esri 连接超时）。地表改为暗底球色 + 世界矢量国界，
-      // 零外部依赖、离线可用。后续要影像细节时配好 token 换回影像图层即可。
-      baseLayer: false,
-      // 按设备物理分辨率渲染：高分屏/系统缩放下缺省值会发虚
-      useBrowserRecommendedResolution: true,
-      // 大屏不需要这些默认控件：搜索框/全屏/场景切换与业务无关；
-      // 时间轴与动画控件等做轨迹回放时再开启。
-      animation: false,
-      timeline: false,
-      geocoder: false,
-      homeButton: false,
-      sceneModePicker: false,
-      navigationHelpButton: false,
-      baseLayerPicker: false,
-      fullscreenButton: false,
-      infoBox: false,
-      selectionIndicator: false,
+    let viewer: Cesium.Viewer
+    try {
+      viewer = new Cesium.Viewer(container, {
+        // 不加载影像瓦片：境外瓦片源在目标网络下均不可用（官方影像要 token、
+        // Carto 要 key、Esri 连接超时）。地表改为暗底球色 + 世界矢量国界，
+        // 零外部依赖、离线可用。后续要影像细节时配好 token 换回影像图层即可。
+        baseLayer: false,
+        // 按设备物理分辨率渲染：高分屏/系统缩放下缺省值会发虚
+        useBrowserRecommendedResolution: true,
+        // 大屏不需要这些默认控件：搜索框/全屏/场景切换与业务无关；
+        // 时间轴与动画控件等做轨迹回放时再开启。
+        animation: false,
+        timeline: false,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        baseLayerPicker: false,
+        fullscreenButton: false,
+        infoBox: false,
+        selectionIndicator: false,
+        // 不弹 Cesium 渲染错误红窗，改由我们自己的兜底处理
+        showRenderLoopErrors: false,
+        // 关闭 OIT 与 2D/CV 管线，降低 fragment shader 编译面，
+        // 对集成显卡 / Windows ANGLE 兼容性更好
+        orderIndependentTranslucency: false,
+        scene3DOnly: true,
+      })
+    } catch (err) {
+      console.error('[Cesium] Viewer 初始化失败', err)
+      // 必须同步 setState 上报：Cesium 初始化属于「与外部系统同步」，失败时要立刻
+      // 用兜底 UI 顶掉画布；延后到 microtask 会先渲染出一帧空白容器。
+      // eslint-disable-next-line react/set-state-in-effect
+      setCesiumError(err instanceof Error ? err.message : String(err))
+      return
+    }
+
+    // 捕获渲染循环里的错误（例如 fragment shader 编译失败），把完整日志打到控制台，
+    // 页面上用轻提示兜底，不再让 Cesium 红窗/未捕获异常把整页打到 ErrorBoundary
+    const renderErrorFired = { current: false }
+    viewer.scene.renderError.addEventListener((_, error) => {
+      if (renderErrorFired.current) return
+      renderErrorFired.current = true
+      console.error('[Cesium renderError]', error)
+      setCesiumError(error?.message ?? 'Cesium 渲染失败，请查看控制台日志')
     })
+
     // 隐藏左下角 Cesium ion 标识：本方案不使用任何官方影像服务，无需其署名。
     // Cesium 把它声明成 Element（运行时实际是 div），取 style 需要断言成 HTMLElement
     ;(viewer.cesiumWidget.creditContainer as HTMLElement).style.display = 'none'
     // 关闭 FXAA 后处理：它会把整个画面软化发虚，暗色矢量场景尤其明显
     viewer.scene.postProcessStages.fxaa.enabled = false
-    // 动态分辨率：静止时 2 倍超采样取锐利，拖动/缩放过程中回落到 1 保流畅。
-    // 固定 2 倍等于 4 倍像素填充，一直开着在弱 GPU 上拖动会掉帧，所以只在静止时开。
-    viewer.resolutionScale = 2
+    // 关闭 HDR：集成显卡 / 部分 Windows ANGLE 后端编译 HDR fragment shader 会失败
+    viewer.scene.highDynamicRange = false
+    // 关闭天空盒/天空大气/太阳/月亮：本方案不渲染宇宙背景，少编译一批
+    // 只在特定视角可见的 shader，既降风险又省 GPU。
+    // 这几个属性在类型上是可选的（构造失败时为 undefined），逐个判空再关。
+    const scene = viewer.scene
+    if (scene.skyBox) scene.skyBox.show = false
+    if (scene.skyAtmosphere) scene.skyAtmosphere.show = false
+    if (scene.sun) scene.sun.show = false
+    if (scene.moon) scene.moon.show = false
+    // 动态分辨率：静止时 1.5 倍超采样取锐利，拖动/缩放过程中回落到 1 保流畅。
+    // 之前固定 2 倍在部分驱动下会让渲染目标尺寸超限，上限压到 1.5 更稳。
+    const maxScale = Math.min(window.devicePixelRatio || 1, 1.5)
+    viewer.resolutionScale = maxScale
     let idleTimer: ReturnType<typeof setTimeout> | undefined
     const onCameraChanged = () => {
       viewer.resolutionScale = 1
       if (idleTimer) clearTimeout(idleTimer)
       idleTimer = setTimeout(() => {
-        viewer.resolutionScale = 2
+        viewer.resolutionScale = maxScale
       }, 300)
     }
     viewer.camera.changed.addEventListener(onCameraChanged)
@@ -388,8 +427,8 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
     }
     legToShipmentRef.current = legToShipment
 
-    // 航线：一条清晰规则——**虚线 = 计划航段（未走），青色实线 = 实际轨迹（已走过）**。
-    // - 已完成 / 已送达段：整段都走过 → 青色实线
+    // 航线：一条清晰规则——**线型 = 走没走过（虚线未走 / 实线已走），颜色 = 状态**。
+    // - 已完成 / 已送达段：整段都走过 → 实线；准点用青色，延误用状态橙色
     // - 活动 / 计划 / 跳过段：整段计划虚线（状态色）做底；活动段的已走部分由青色尾迹
     //   压在虚线之上，形成「一条线、走过 vs 未走分色」。
     // 整段虚线做底（而非只画剩余段），保证没有轨迹数据时也有线、不断线，
@@ -415,13 +454,16 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
         )
 
         if (isDelivered || leg.status === 'completed') {
-          // 已完成/已送达：整段都是实际轨迹 → 青色实线（与图例一致）
+          // 已走完的段画实线；颜色仍跟状态走：准点（已送达 / 在途已完段）用青色，
+          // 延误用状态橙色——否则延误票和正常票在图上完全无法区分
+          const doneColor =
+            route.status === 'delayed' ? color : Cesium.Color.fromCssColorString(ACTUAL_COLOR)
           ds.entities.add({
             id: `${ID_ROUTE}${route.shipment_id}:${leg.seq}`,
             polyline: {
               positions: [origin, dest],
               width: 2,
-              material: Cesium.Color.fromCssColorString(ACTUAL_COLOR).withAlpha(0.95),
+              material: doneColor.withAlpha(0.95),
             },
           })
         } else {
@@ -733,6 +775,31 @@ export default function CesiumMap({ data }: { data: MapOverview | null }) {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+      {/* Cesium 初始化/渲染失败兜底：盖在画布上给明确文案，不再让异常冒泡到全局 ErrorBoundary */}
+      {cesiumError != null && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#0b1f33',
+            color: '#c9d7e8',
+            fontSize: 13,
+            padding: 24,
+            textAlign: 'center',
+            zIndex: 5,
+          }}
+        >
+          <div>
+            <div style={{ marginBottom: 8, fontSize: 15, color: '#ff7875' }}>
+              3D 地球渲染失败，其余功能不受影响
+            </div>
+            <div style={{ color: '#8aa4c0' }}>{cesiumError}</div>
+          </div>
+        </div>
+      )}
       <div style={{ position: 'absolute', top: 16, left: 16, display: 'flex', gap: 8 }}>
         {/* 状态筛选：独立多选，可任意组合（默认在途），不再用「全部运单」这种粗档 */}
         {STATUS_ORDER.map((s) => {

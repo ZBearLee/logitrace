@@ -26,6 +26,18 @@ docker compose ps        # 三个服务 healthy 即可
 - Swagger 文档：<http://127.0.0.1:8000/docs>
 - 健康检查：<http://127.0.0.1:8000/health>
 
+### 一键启动（推荐）
+
+```powershell
+.\start.ps1                 # 起容器（自动 rebuild）+ 实时位置推流
+.\start.ps1 -WithFrontend   # 额外拉起前端 dev server
+.\start.ps1 -NoSimulator    # 只起容器
+```
+
+脚本会等三个容器 healthy 后再启动推流，并自动跳过已运行的实例（多实例会重复写入轨迹点）。
+停止用 `.\stop.ps1`（默认保留数据卷），要连前端一起停加 `-WithFrontend`。
+若提示禁止运行脚本：`powershell -ExecutionPolicy Bypass -File .\start.ps1`。
+
 ---
 
 ## 目录结构

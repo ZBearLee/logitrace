@@ -101,8 +101,12 @@ async def analytics_summary(
 
         key = carrier_id
         if key not in carriers:
-            name, mode = (carrier_name, carrier_mode) if carrier_id is not None else _UNKNOWN_CARRIER
-            carriers[key] = CarrierMetric(carrier_id=carrier_id, name=name or "未知承运商", mode=mode or "unknown")
+            name, mode = (
+                (carrier_name, carrier_mode) if carrier_id is not None else _UNKNOWN_CARRIER
+            )
+            carriers[key] = CarrierMetric(
+                carrier_id=carrier_id, name=name or "未知承运商", mode=mode or "unknown"
+            )
         cm = carriers[key]
         cm.total += 1
         if is_on_time:
@@ -130,7 +134,9 @@ async def analytics_summary(
     ex_base = select(ExceptionRecord.type, func.count()).group_by(ExceptionRecord.type)
     if window_start is not None:
         ex_base = ex_base.where(ExceptionRecord.detected_at >= window_start)
-    delay_reasons = [DelayReason(type=t, count=c) for t, c in (await session.execute(ex_base)).all()]
+    delay_reasons = [
+        DelayReason(type=t, count=c) for t, c in (await session.execute(ex_base)).all()
+    ]
 
     # 航线流量（桑基图）：起点→终点口岸运量 Top N，按运输方式着色。
     # 单独聚合全量 shipments 的 OD 段（不限评分样本），看「货往哪流」比仅看已送达更全。
@@ -161,7 +167,9 @@ async def analytics_summary(
         on_time=on_time,
         delayed=delayed,
         on_time_rate=round(on_time / total_rated, 4) if total_rated else 0,
-        delay_buckets=[DelayBucket(label=label, count=buckets[label]) for label, _ in _DELAY_BUCKETS],
+        delay_buckets=[
+            DelayBucket(label=label, count=buckets[label]) for label, _ in _DELAY_BUCKETS
+        ],
         carriers=sorted(carriers.values(), key=lambda c: c.total, reverse=True),
         trend=trend_points,
         delay_reasons=delay_reasons,

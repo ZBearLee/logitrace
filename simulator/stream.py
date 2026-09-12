@@ -191,8 +191,8 @@ def run() -> None:
     prev_pos: dict[
         int, tuple[float, float]
     ] = {}  # leg_id -> 上一 tick 位置，用于算速度
-    stall_windows: dict[int, datetime] = {}  # leg_id -> 演示滞留到期时间
-    stall_registered: set[int] = set()  # 已注册演示滞留的 leg，避免重复注册
+    stall_windows: dict[int, datetime] = {}  # leg_id -> 滞留注入到期时间
+    stall_registered: set[int] = set()  # 已注册滞留注入的 leg，避免重复注册
     completed: dict[int, set[int]] = {}  # shipment_id -> 已完成 leg 集合
     persist_acc: dict[int, float] = {}  # leg_id -> 已累计未落库的真实秒数
     ship_legs: dict[int, set[int]] = {}  # shipment_id -> 该运单所有段（判全完成）
@@ -309,7 +309,7 @@ def run() -> None:
                     if progress <= 0.0:
                         continue  # 还没出发
 
-                    # 演示用滞留注入：少数在途段注册一个短暂冻结窗口（位置冻结、速度记 0），
+                    # 滞留注入：少数在途段注册一个短暂冻结窗口（位置冻结、速度记 0），
                     # 让滑动窗口判滞留能产出真实异常，异常中心才有内容可展示。
                     # 注册点放在「已在途」这里，而不是 planned→active 的跃迁那一 tick：
                     # seed 生成的在途运单当前段本来就是 active，抓不到跃迁，
@@ -318,7 +318,7 @@ def run() -> None:
                         stall_windows[lid] = sim_now + timedelta(seconds=90)
                         stall_registered.add(lid)
 
-                    # 演示用滞留注入：少数在途段短暂"卡住"（位置冻结、速度记 0），
+                    # 滞留注入：少数在途段短暂"卡住"（位置冻结、速度记 0），
                     # 让滑动窗口判滞留能产出真实异常数据，异常中心才有内容可展示。
                     # 冻结只在前序窗口内生效，到期自动恢复正常推进。
                     if lid in stall_windows and sim_now < stall_windows[lid]:

@@ -1,4 +1,4 @@
-// 登录页：校验演示账号，成功后保存令牌并进入系统。
+// 登录页：校验账号口令，成功后保存令牌并进入系统。
 import { useState } from 'react'
 import { App, Button, Card, Form, Input, Typography } from 'antd'
 import { LockOutlined, UserOutlined } from '@ant-design/icons'

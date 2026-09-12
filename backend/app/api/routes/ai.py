@@ -128,7 +128,7 @@ async def ai_query(body: AiQueryIn, session: SessionDep) -> AiQueryOut:
     items = []
     for s, o_code, d_code, carrier_name, o_lat, o_lng, d_lat, d_lng in rows:
         if "delay_over_hours" in params:
-            # 延误时长要 actual/planned 齐全才能算，Python 侧过滤（演示数据量小）
+            # 延误时长要 actual/planned 齐全才能算，Python 侧过滤（当前数据量小）
             if s.actual_arrival is None or s.planned_arrival is None:
                 continue
             delay_h = (s.actual_arrival - s.planned_arrival).total_seconds() / 3600
@@ -176,7 +176,7 @@ async def get_daily_report(
     session: SessionDep,
     date: str | None = Query(None, description="YYYY-MM-DD，默认当天；缺记录时现算"),
 ) -> DailyReportOut:
-    """日报查询：优先读表，缺当天记录时按需生成（演示不等调度）。"""
+    """日报查询：优先读表，缺当天记录时按需生成（无需等调度）。"""
     today = datetime.now().date().isoformat()
     report_date = date or today
     report = (
@@ -209,7 +209,7 @@ async def get_daily_report(
 
 @router.post("/eta/refresh", response_model=dict)
 async def eta_refresh(session: SessionDep) -> dict:
-    """手动触发一次 ETA 批量推理（演示用；调度器每小时也会自动跑）。"""
+    """手动触发一次 ETA 批量推理（调度器每小时也会自动跑）。"""
     return await refresh_eta_predictions(session)
 
 
@@ -217,16 +217,18 @@ async def eta_refresh(session: SessionDep) -> dict:
 async def get_eta(shipment_id: int, session: SessionDep) -> EtaOut:
     """单票 ETA：取最新一条预测，并算相对计划到达的偏差（驱动详情页延误预警）。"""
     pred = (
-        await session.execute(
-            select(EtaPrediction)
-            .where(EtaPrediction.shipment_id == shipment_id)
-            .order_by(EtaPrediction.created_at.desc())
+        (
+            await session.execute(
+                select(EtaPrediction)
+                .where(EtaPrediction.shipment_id == shipment_id)
+                .order_by(EtaPrediction.created_at.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     if pred is None:
-        raise HTTPException(
-            status_code=404, detail="暂无 ETA 预测（模型未训练或该运单不在途）"
-        )
+        raise HTTPException(status_code=404, detail="暂无 ETA 预测（模型未训练或该运单不在途）")
     ship = (
         await session.execute(select(Shipment).where(Shipment.id == shipment_id))
     ).scalar_one_or_none()

@@ -86,7 +86,8 @@ export default function Warehouse() {
   const total = data?.slots.length ?? 0
   // 已用 = 有货(occupied) + 预占(reserved)：与 3D 场景里着色的库位一致，
   // 单独数 occupied 会让「无真实运单」的仓库统计为 0、视觉却满屏，对不上。
-  const used = data?.slots.filter((s) => s.status === 'occupied' || s.status === 'reserved').length ?? 0
+  const used =
+    data?.slots.filter((s) => s.status === 'occupied' || s.status === 'reserved').length ?? 0
 
   return (
     <div style={{ padding: '12px 16px 16px', height: '100%', overflow: 'auto' }}>

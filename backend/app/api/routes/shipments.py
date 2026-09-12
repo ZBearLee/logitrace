@@ -113,9 +113,7 @@ async def get_shipment_eta(shipment_id: int, session: SessionDep) -> EtaOut:
         raise HTTPException(status_code=404, detail="暂无 ETA 预测")
 
     planned = (
-        await session.execute(
-            select(Shipment.planned_arrival).where(Shipment.id == shipment_id)
-        )
+        await session.execute(select(Shipment.planned_arrival).where(Shipment.id == shipment_id))
     ).scalar_one_or_none()
     deviation = (
         (pred.predicted_arrival - planned).total_seconds() / 3600 if planned is not None else None

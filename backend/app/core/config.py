@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     ai_base_url: str = ""
     ai_model: str = ""
 
-    # 登录鉴权：演示账号签发 JWT。密钥从环境变量读，默认值仅供本地开发
+    # 登录鉴权：为登录账号签发 JWT。密钥从环境变量读，默认值仅供本地开发
     auth_secret: str = "logitrace-dev-secret"
     auth_token_ttl_minutes: int = 480
 

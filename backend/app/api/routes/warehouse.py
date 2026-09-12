@@ -1,11 +1,11 @@
 """仓库数字孪生：一次返回库位布局 + 月台状态 + 在库作业任务，供 Three.js 场景渲染。
 
 数据从哪来：库位不在域模型（5.1 表清单）里，这里**按「仓库 id + 固定种子」确定性生成**——
-同一仓库每次请求布局完全一致，可复现、可点选、可截图演示；接入真实 WMS 时把生成逻辑
+同一仓库每次请求布局完全一致，可复现、可点选；接入真实 WMS 时把生成逻辑
 换成读库位表即可，前端契约（WarehouseLayout）不变。
 
-为什么不建库位表：库位布局只需支撑 Three.js 渲染与联动演示，建表要动 Alembic 迁移、
-依赖本地能跑迁移命令；而占用率仍由该仓库的**真实运单量**推导，演示不是纯随机数。
+为什么不建库位表：库位布局只需支撑 Three.js 渲染与联动展示，建表要动 Alembic 迁移、
+依赖本地能跑迁移命令；而占用率仍由该仓库的**真实运单量**推导，并非纯随机数。
 """
 
 import random
@@ -43,7 +43,9 @@ async def warehouse_layout(session: SessionDep, location_id: int) -> WarehouseLa
     占用率由该仓库关联的真实运单量推导（关联越多越满），库位与运单的绑定关系
     由固定种子决定，保证同一仓库每次刷新位置不变。
     """
-    loc = (await session.execute(select(Location).where(Location.id == location_id))).scalar_one_or_none()
+    loc = (
+        await session.execute(select(Location).where(Location.id == location_id))
+    ).scalar_one_or_none()
     if loc is None:
         raise HTTPException(status_code=404, detail="地点不存在")
     if loc.type != "warehouse":
@@ -70,7 +72,7 @@ async def warehouse_layout(session: SessionDep, location_id: int) -> WarehouseLa
     ).all()
 
     # 占用率：关联运单越多越满，夹在 45%~90% 之间。
-    # 下限取 45% 而非更低——演示用数据量下真实占比可能只有一成多，
+    # 下限取 45% 而非更低——当前数据量下真实占比可能只有一成多，
     # 满屏空位既看不出「千库位」的规模感，也让 InstancedMesh 的颜色分层失去意义。
     rate = min(0.9, max(0.45, involved / 40))
 
@@ -102,9 +104,7 @@ async def warehouse_layout(session: SessionDep, location_id: int) -> WarehouseLa
             occupied_idx.append(idx)
         elif roll < p + 0.03:
             slots.append(
-                WarehouseSlot(
-                    index=idx, row=row, col=col, level=level, status="reserved", sku="—"
-                )
+                WarehouseSlot(index=idx, row=row, col=col, level=level, status="reserved", sku="—")
             )
         else:
             slots.append(WarehouseSlot(index=idx, row=row, col=col, level=level, status="empty"))
@@ -146,8 +146,7 @@ async def warehouse_layout(session: SessionDep, location_id: int) -> WarehouseLa
         # 否则无真实运单的仓库（如厦门内陆仓：厦门港不在航线里）视觉满屏橙色、
         # 统计却显示 0%，两者对不上。空位(empty)不计入。
         occupancy_rate=round(
-            (len(occupied_idx) + sum(1 for s in slots if s.status == "reserved"))
-            / len(slots),
+            (len(occupied_idx) + sum(1 for s in slots if s.status == "reserved")) / len(slots),
             4,
         ),
         slots=slots,

@@ -4,7 +4,7 @@
 大屏要对几十条运单画线，逐条请求就是 N+1，所以单独提供这个聚合读法。
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select
@@ -88,34 +88,48 @@ async def map_overview(
     ]
     tracks: dict[int, list[list[float]]] = {}
     if active_leg_ids:
-        rn = (
-            func.row_number()
-            .over(partition_by=PositionPoint.leg_id, order_by=PositionPoint.recorded_at.desc())
-            .label("rn")
-        )
-        recent = (
-            select(
-                PositionPoint.leg_id,
-                PositionPoint.lng,
-                PositionPoint.lat,
-                PositionPoint.recorded_at,
-                rn,
+        # 先锚定时间窗再窗口函数：取活动段最新点的时间（走 idx_leg_time 索引，毫秒级），
+        # 只看它之前 7 小时内的点。模拟器 60s 采样一个点，360 点 = 6 小时航程，留 1 小时余量。
+        # 没有这层裁剪时，row_number 窗口要把每个活动段**累积的全部历史**（模拟器长跑后
+        # 每段几十万点、全表百万行级）扫一遍再排序，接口慢到 15s+，前端 10s 超时直接报错。
+        latest_at = await session.scalar(
+            select(func.max(PositionPoint.recorded_at)).where(
+                PositionPoint.leg_id.in_(active_leg_ids)
             )
-            .where(PositionPoint.leg_id.in_(active_leg_ids))
-            .subquery()
         )
-        track_rows = (
-            await session.execute(
-                select(recent.c.leg_id, recent.c.lng, recent.c.lat, recent.c.recorded_at)
-                # 模拟器每 60s 落一个点：360 点 ≈ 6 小时航程 ≈ 200km，缩放到位图上
-                # 才是一段肉眼可见的线；60 点只有 30km，全球视角下不足 1 像素
-                .where(recent.c.rn <= 360)
-                .order_by(recent.c.leg_id, recent.c.rn.desc())
+        if latest_at is not None:
+            cutoff = latest_at - timedelta(hours=7)
+            rn = (
+                func.row_number()
+                .over(partition_by=PositionPoint.leg_id, order_by=PositionPoint.recorded_at.desc())
+                .label("rn")
             )
-        ).all()
-        for leg_id, lng, lat, recorded_at in track_rows:
-            # 带上时间戳：前端时间轴回放靠它把「已走过」按当前时刻切片
-            tracks.setdefault(leg_id, []).append([lng, lat, _epoch_ms(recorded_at)])
+            recent = (
+                select(
+                    PositionPoint.leg_id,
+                    PositionPoint.lng,
+                    PositionPoint.lat,
+                    PositionPoint.recorded_at,
+                    rn,
+                )
+                .where(
+                    PositionPoint.leg_id.in_(active_leg_ids),
+                    PositionPoint.recorded_at >= cutoff,
+                )
+                .subquery()
+            )
+            track_rows = (
+                await session.execute(
+                    select(recent.c.leg_id, recent.c.lng, recent.c.lat, recent.c.recorded_at)
+                    # 模拟器每 60s 落一个点：360 点 ≈ 6 小时航程 ≈ 200km，缩放到位图上
+                    # 才是一段肉眼可见的线；60 点只有 30km，全球视角下不足 1 像素
+                    .where(recent.c.rn <= 360)
+                    .order_by(recent.c.leg_id, recent.c.rn.desc())
+                )
+            ).all()
+            for leg_id, lng, lat, recorded_at in track_rows:
+                # 带上时间戳：前端时间轴回放靠它把「已走过」按当前时刻切片
+                tracks.setdefault(leg_id, []).append([lng, lat, _epoch_ms(recorded_at)])
     for legs in legs_by_shipment.values():
         for leg in legs:
             leg.track = tracks.get(leg.leg_id, [])
