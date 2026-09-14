@@ -37,7 +37,7 @@ export default function CarrierBar({
     const svg = select(ref.current)
     svg.selectAll('*').remove()
 
-    const margin = { top: 20, right: 12, bottom: 54, left: 36 }
+    const margin = { top: 20, right: 12, bottom: 74, left: 36 }
     const innerW = width - margin.left - margin.right
     const innerH = height - margin.top - margin.bottom
 
@@ -111,12 +111,16 @@ export default function CarrierBar({
       .call((sel) => sel.select('.domain').remove())
       .selectAll('text')
       .attr('fill', AXIS_COLOR)
-      .attr('font-size', 11)
+      .attr('font-size', 10)
+      .attr('transform', 'rotate(-45)')
+      .attr('text-anchor', 'end')
+      .attr('dx', '-0.4em')
+      .attr('dy', '0.3em')
       .each(function (_, i) {
-        // 承运商名可能较长，超出柱宽就截断加省略号，避免横轴标签互相压字
+        // 承运商名可能较长，超出柱宽就截断加省略号；旋转后仍做截断保险
         const node = this as SVGTextElement
-        const maxChars = Math.max(4, Math.floor(x.bandwidth() / 12))
         const full = rows[i].name
+        const maxChars = 14
         if (full.length > maxChars) node.textContent = `${full.slice(0, maxChars)}…`
       })
 

@@ -129,24 +129,45 @@ export default function Analytics() {
           </div>
         </Card>
 
-        <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        <Row gutter={[16, 16]} style={{ marginTop: 16 }} align="stretch">
           <Col xs={24} lg={8}>
-            <Card title="整体准点率">
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Card title="整体准点率" style={{ height: 440 }}>
+              <div
+                style={{
+                  height: 320,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <OnTimeDonut onTime={data?.on_time ?? 0} delayed={data?.delayed ?? 0} />
               </div>
             </Card>
           </Col>
           <Col xs={24} lg={8}>
-            <Card title="延误时长分布（点击区间下钻）">
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Card title="延误时长分布（点击区间下钻）" style={{ height: 440 }}>
+              <div
+                style={{
+                  height: 320,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <DelayHistogram buckets={data?.delay_buckets ?? []} onSelectBucket={openBucket} />
               </div>
             </Card>
           </Col>
           <Col xs={24} lg={8}>
-            <Card title="承运商准点对比（点击柱体下钻）">
-              <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <Card title="承运商准点对比（点击柱体下钻）" style={{ height: 440 }}>
+              <div
+                style={{
+                  height: 320,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
                 <CarrierBar carriers={data?.carriers ?? []} onSelectCarrier={openCarrier} />
               </div>
               <Legend
