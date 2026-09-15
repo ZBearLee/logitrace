@@ -67,6 +67,10 @@ services:
       context: ..            # 构建上下文 = 项目根目录
       dockerfile: backend/Dockerfile
     container_name: logitrace-backend
+    # 本地 .env 的其余配置（AI_API_KEY / AI_BASE_URL / AI_MODEL 等）注入容器；
+    # environment 优先级高于 env_file，上面的 mysql/redis 主机名不会被 .env 里的 localhost 覆盖
+    env_file:
+      - ../backend/.env
     environment:
       # 容器内用服务名互访，不用 localhost
       MYSQL_HOST: mysql
