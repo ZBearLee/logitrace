@@ -65,3 +65,61 @@ logitrace/
 ├── simulator/    # 数据模拟器
 └── deploy/       # docker-compose 编排
 ```
+
+---
+
+## 效果展示
+
+### 运单列表
+![运单列表](https://github.com/user-attachments/assets/05b8e67f-40d5-46d7-b6af-41252a28f3bd)
+
+### Echarts显示运输中轨迹
+![Echarts显示运输中轨迹](https://github.com/user-attachments/assets/a03793c3-0374-4ddb-8f35-53183e6b1dd7)
+
+### 高德地图显示运输中轨迹
+![高德地图显示运输中轨迹](https://github.com/user-attachments/assets/b6c9df7c-b1a0-48d2-886c-4d439473324e)
+
+### 首页大圆插值显示航线
+![首页大圆插值显示航线](https://github.com/user-attachments/assets/bdcb828d-a641-43cd-8742-776590c71616)
+
+### 首页大圆根据状态显示航线
+![首页大圆根据状态显示航线](https://github.com/user-attachments/assets/684d24aa-6cbd-4e66-bd79-82cbc70b1855)
+
+### 历史回放显示航线位置运输运动过程
+![历史回放显示航线位置运输运动过程](https://github.com/user-attachments/assets/53c2b601-d222-4751-9ce9-d3b509e892c9)
+
+### 首页大屏点击航线跳转到对应的运单详情
+![首页大屏点击航线跳转到对应的运单详情](https://github.com/user-attachments/assets/de99350c-118f-45fa-a74c-848dd89cce38)
+
+### D3应用-运营看板
+![D3应用-运营看板](https://github.com/user-attachments/assets/68c9f787-b227-430c-b2be-e6268d59844b)
+
+### 港口网络图
+![港口网络图](https://github.com/user-attachments/assets/f817ab8a-d1c4-43a7-86c5-1bb947138adf)
+
+### 框选网络图之后跳转到首页大屏展示对应港口的运输关系
+![框选网络图之后跳转到首页大屏展示对应港口的运输关系](https://github.com/user-attachments/assets/8eaf3e3e-d93a-4df8-a6c7-e231decf79a2)
+
+### 框选的港口的航线在大屏高亮显示
+![框选的港口的航线在大屏高亮显示](https://github.com/user-attachments/assets/ee518d6c-8867-480f-aa70-dc81f0574684)
+
+### 首页大圆点击仓库可进入3D场景
+![首页大圆点击仓库可进入3D场景](https://github.com/user-attachments/assets/d62cb7e4-4c78-47eb-afe0-cdbee1da1a3b)
+
+### 查看仓库的使用情况
+![查看仓库的使用情况](https://github.com/user-attachments/assets/a58aa25e-a22e-44aa-a0d2-5dd89b3478a7)
+
+### 点击库位查看使用情况
+![点击库位查看使用情况](https://github.com/user-attachments/assets/16723898-4de9-4aaf-9695-a9aa9aad9300)
+
+### AI异常时降级使用保证其它功能正常
+![AI异常时降级使用保证其它功能正常](https://github.com/user-attachments/assets/0080853b-1367-4cc4-b68b-e13464d1e977)
+
+### AI控制面板全局弹出查数
+![AI控制面板全局弹出查数](https://github.com/user-attachments/assets/3fb8052b-7382-4905-9e68-48a30e8be02e)
+
+### AI辅助-ETA预测到达时间
+![AI辅助-ETA预测到达时间](https://github.com/user-attachments/assets/dd0b6611-a495-4fc5-a5eb-5adfacbf7f76)
+
+### AI辅助-异常日报
+![AI辅助-异常日报](https://github.com/user-attachments/assets/94173a06-18ad-4270-98af-62d4a52688ae)
